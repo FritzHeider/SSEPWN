@@ -62,7 +62,7 @@ importantly — the backpressure gates every later phase depends on.
 - [x] Drizzle schema + migration for all SPEC tables
 - [x] ffmpeg exec wrapper + probe with types
 - [x] make-fixtures.sh generating all five fixtures, idempotent
-- [ ] ffmpeg probe integration tests green
+- [x] ffmpeg probe integration tests green
 - [ ] README runnable end-to-end on a fresh machine
 - [ ] All acceptance criteria verified in one iteration
 - [ ] PHASE_COMPLETE
