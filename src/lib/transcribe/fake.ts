@@ -1,7 +1,12 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { Transcriber, TranscriptSegment, TranscriptWord } from "./types";
+import type {
+  TranscribeOptions,
+  Transcriber,
+  TranscriptSegment,
+  TranscriptWord,
+} from "./types";
 
 /**
  * Where the canned transcripts live.
@@ -106,10 +111,20 @@ export function parseTranscriptFixture(raw: string, source: string): TranscriptS
  * whisper.cpp (SPEC.md § Tech stack: "never call real whisper in the default
  * test suite"). Selected by `TRANSCRIBER=fake`.
  *
- * The transcript is chosen by the media file's basename — `long-sample.mp4`
- * (or an extracted `long-sample.wav`) replays `long-sample.json` — so the fake
- * runs through the exact same pipeline the real transcriber does, keyed off the
- * path the job handler already has.
+ * The transcript is chosen by the media's name — `long-sample.mp4` replays
+ * `long-sample.json` — so the fake runs through the exact same pipeline the real
+ * transcriber does.
+ *
+ * Two candidates are tried, in this order:
+ *  1. `options.sourceName`, the name the media was uploaded under. This is the
+ *     one that matters in the real pipeline: an upload is stored as
+ *     `data/uploads/<uuid>.mp4`, so its path says nothing about what it is.
+ *  2. the basename of `audioPath`, for direct calls that hand over a fixture
+ *     path (unit tests, scripts) or an extracted `long-sample.wav`.
+ *
+ * If neither resolves it throws. Falling back to a default transcript would make
+ * the fake succeed no matter how the pipeline is miswired — the misconfiguration
+ * this fake exists to expose would become invisible.
  */
 export class FakeTranscriber implements Transcriber {
   private readonly dir: string;
@@ -118,26 +133,44 @@ export class FakeTranscriber implements Transcriber {
     this.dir = options.dir ?? DEFAULT_TRANSCRIPT_DIR;
   }
 
-  async transcribe(audioPath: string): Promise<TranscriptSegment[]> {
-    const stem = path.basename(audioPath, path.extname(audioPath));
-    const fixture = path.join(this.dir, `${stem}.json`);
+  /**
+   * Fixture path for a media name.
+   *
+   * `path.basename` (not a bare extension strip) is load-bearing: `sourceName`
+   * carries an uploaded filename, so a crafted `../../etc/passwd` must collapse
+   * to a plain lookup inside `dir` rather than reading its way out of it.
+   */
+  private fixtureFor(mediaName: string): string {
+    return path.join(this.dir, `${path.basename(mediaName, path.extname(mediaName))}.json`);
+  }
 
-    let raw: string;
-    try {
-      raw = await readFile(fixture, "utf8");
-    } catch (error) {
-      // Resolving to [] here would be indistinguishable from a silent video and
-      // would quietly produce an empty transcript, so this fails loudly instead.
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error(
-          `No fake transcript for "${path.basename(audioPath)}" — expected a fixture at ` +
-            `"${fixture}". Add one, or unset TRANSCRIBER=fake to use real whisper.cpp ` +
-            `(see README.md § Transcription).`,
-        );
+  async transcribe(audioPath: string, options: TranscribeOptions = {}): Promise<TranscriptSegment[]> {
+    const candidates = [options.sourceName, audioPath]
+      .filter((name): name is string => typeof name === "string" && name.trim().length > 0)
+      .map((name) => this.fixtureFor(name));
+
+    for (const fixture of candidates) {
+      let raw: string;
+      try {
+        raw = await readFile(fixture, "utf8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
       }
-      throw error;
+      return parseTranscriptFixture(raw, fixture);
     }
 
-    return parseTranscriptFixture(raw, fixture);
+    // Resolving to [] here would be indistinguishable from a silent video and
+    // would quietly produce an empty transcript, so this fails loudly instead.
+    // The message names the stored path too: with an upload that path is a bare
+    // UUID, and seeing it is what tells you the name is the only usable key.
+    const label = options.sourceName
+      ? `"${options.sourceName}" (stored at "${audioPath}")`
+      : `"${path.basename(audioPath)}"`;
+    throw new Error(
+      `No fake transcript for ${label} — tried ${candidates.map((c) => `"${c}"`).join(", ")}. ` +
+        `Add a fixture named after the media, or unset TRANSCRIBER=fake to use real ` +
+        `whisper.cpp (see README.md § Transcription).`,
+    );
   }
 }

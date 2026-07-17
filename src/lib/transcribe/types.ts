@@ -22,6 +22,17 @@ export interface TranscriptSegment {
   words: TranscriptWord[];
 }
 
+export interface TranscribeOptions {
+  /**
+   * Human-readable name of the media — the filename the user uploaded, NOT a
+   * path. Uploads are stored under a generated UUID, so `audioPath` carries no
+   * trace of what the file was; anything that needs to recognise the media
+   * (`FakeTranscriber` matching a canned transcript) needs this instead.
+   * Real transcribers ignore it: it is a label, not input.
+   */
+  sourceName?: string;
+}
+
 export interface Transcriber {
   /**
    * Transcribe an audio or video file into timed segments.
@@ -30,5 +41,5 @@ export interface Transcriber {
    * binary, model, or file) rather than resolving to an empty transcript, so a
    * misconfigured environment fails loudly instead of looking like silence.
    */
-  transcribe(audioPath: string): Promise<TranscriptSegment[]>;
+  transcribe(audioPath: string, options?: TranscribeOptions): Promise<TranscriptSegment[]>;
 }

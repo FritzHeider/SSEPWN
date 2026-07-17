@@ -49,9 +49,16 @@ whisper binary and no model present.
 | `WHISPER_BIN` | `whisper-cli` | Path to the built whisper.cpp CLI |
 | `WHISPER_MODEL` | `models/ggml-base.en.bin` | Path to a ggml model file |
 
-`TRANSCRIBER=fake` replays `tests/samples/transcripts/<media-basename>.json`, which
-is how the suite runs without whisper. An unrecognised value is a startup error
-rather than a silent fallback, so a typo cannot quietly reach the real binary.
+`TRANSCRIBER=fake` replays `tests/samples/transcripts/<name>.json`, which is how
+the suite runs without whisper. The `<name>` is matched against the project's
+name (the filename it was uploaded under — uploads are stored under a generated
+UUID, so the stored path cannot identify the media), falling back to the source
+file's own basename. So uploading `long-sample.mp4` replays `long-sample.json`,
+but a project renamed to something without a matching fixture fails with an error
+naming both candidates it tried — it never invents an empty transcript, since
+that would be indistinguishable from a silent video. Likewise, an unrecognised
+`TRANSCRIBER` value is a startup error rather than a silent fallback, so a typo
+cannot quietly reach the real binary.
 
 Only needed to transcribe for real (`npm run worker`):
 

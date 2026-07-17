@@ -75,6 +75,88 @@ describe("FakeTranscriber", () => {
   });
 });
 
+describe("FakeTranscriber sourceName lookup", () => {
+  // An upload is stored as data/uploads/<uuid>.mp4, so the path carries no trace
+  // of what the media is. These pin the one key that survives that rename.
+  const UPLOADED = "/data/uploads/01bf9021-4c1e-4d0a-9d3f-6f2b8a7e5c11.mp4";
+
+  it("resolves the fixture from sourceName when the path is a stored UUID", async () => {
+    const segments = await new FakeTranscriber().transcribe(UPLOADED, {
+      sourceName: "long-sample.mp4",
+    });
+
+    expect(segments.length).toBeGreaterThan(0);
+    expect(segments[0].text).toContain("six months");
+  });
+
+  it("prefers sourceName over the path when the two name different fixtures", async () => {
+    // Both fixtures exist and differ, so this can actually see the ordering — if
+    // they named the same transcript the precedence would be inexpressible.
+    const segments = await new FakeTranscriber().transcribe("fixtures/short-sample.mp4", {
+      sourceName: "long-sample.mp4",
+    });
+
+    const short = await new FakeTranscriber().transcribe("fixtures/short-sample.mp4");
+    expect(segments[0].text).toContain("six months");
+    expect(segments[0].text).not.toBe(short[0].text);
+  });
+
+  it("still resolves from the path when no sourceName is given", async () => {
+    // The direct-path contract every other caller (unit tests, scripts, an
+    // extracted long-sample.wav) relies on. Dropping it would break them all.
+    const segments = await new FakeTranscriber().transcribe(LONG_SAMPLE);
+
+    expect(segments[0].text).toContain("six months");
+  });
+
+  it("falls through to the path when sourceName has no fixture", async () => {
+    const segments = await new FakeTranscriber().transcribe(LONG_SAMPLE, {
+      sourceName: "renamed by the user.mp4",
+    });
+
+    expect(segments[0].text).toContain("six months");
+  });
+
+  it("rejects, naming both candidates, when neither the name nor the path matches", async () => {
+    // The failure mode this whole option exists to prevent is a SILENT one: a
+    // fake that fell back to its only/first fixture would succeed no matter how
+    // badly the pipeline was wired, hiding exactly the bug that produced it.
+    const error = await new FakeTranscriber()
+      .transcribe(UPLOADED, { sourceName: "My Podcast" })
+      .catch((e: Error) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    expect(message).toContain('No fake transcript for "My Podcast"');
+    // Names the stored path too — seeing the bare UUID is the clue that the
+    // name, not the path, is the only usable key.
+    expect(message).toContain(UPLOADED);
+    expect(message).toContain("tests/samples/transcripts/My Podcast.json");
+    expect(message).toContain("01bf9021-4c1e-4d0a-9d3f-6f2b8a7e5c11.json");
+  });
+
+  it("cannot be walked out of the transcript directory by a crafted sourceName", async () => {
+    // sourceName comes from an uploaded filename — user data at a boundary.
+    // A readable fixture sits one level ABOVE the configured dir, so a lookup
+    // that traversed would succeed and return its contents. It must not.
+    const nested = path.join(workDir, "nested");
+    await writeFile(
+      path.join(workDir, "escape.json"),
+      JSON.stringify([{ text: "escaped", start: 0, end: 1, words: [] }]),
+    );
+
+    const error = await new FakeTranscriber({ dir: nested })
+      .transcribe("/data/uploads/x.mp4", { sourceName: "../escape.mp4" })
+      .catch((e: Error) => e);
+
+    // Rejecting (rather than resolving to the file above) is the whole point:
+    // the traversal collapsed to a plain lookup inside the configured dir.
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(path.join(nested, "escape.json"));
+    expect((error as Error).message).not.toContain(path.join(workDir, "escape.json"));
+  });
+});
+
 describe("FakeTranscriber fixture validation", () => {
   it("rejects a fixture that is not JSON", async () => {
     await expect(transcribeFixture("broken", "{not json")).rejects.toThrow(/not valid JSON/);

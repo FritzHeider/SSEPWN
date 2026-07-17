@@ -64,7 +64,14 @@ export function createTranscribeHandler(options: TranscribeHandlerOptions = {}):
     }
 
     setProgress(10);
-    const segments = await createTranscriberFn().transcribe(sourcePath);
+    // `sourceName` matters even though `sourcePath` looks sufficient: uploads are
+    // stored as `data/uploads/<uuid>.mp4`, so the path identifies the bytes but
+    // not the media. `projects.name` is the uploaded filename unless the user
+    // renamed the project, which is what lets FakeTranscriber find its fixture in
+    // the real pipeline. Real transcribers ignore it.
+    const segments = await createTranscriberFn().transcribe(sourcePath, {
+      sourceName: project.name,
+    });
 
     setProgress(80);
     // One transaction, and a delete before the insert: a retried attempt must
