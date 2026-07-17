@@ -30,6 +30,15 @@ export const projects = sqliteTable("projects", {
   hasAudio: integer("has_audio", { mode: "boolean" }),
   /** Poster frame generated at ingest. */
   thumbnailPath: text("thumbnail_path"),
+  /**
+   * Per-project highlight-clip tuning as JSON (clip length min/max, count,
+   * hook-phrase list, per-signal weights — Phase 04 "config surface"). Only the
+   * knobs the user overrode are stored; unset fields fall back to
+   * DEFAULT_CLIP_CONFIG at generate time. Null means "all defaults". A job
+   * payload can still override this per run (regenerate), so this is the base,
+   * not the last word.
+   */
+  clipConfig: text("clip_config"),
   createdAt: integer("created_at")
     .notNull()
     .default(sql`(unixepoch())`),

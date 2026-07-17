@@ -1,113 +1,43 @@
 import { and, eq } from "drizzle-orm";
 
 import { clips, projects, transcripts } from "../../lib/db/schema";
-import { audioEnergy, sceneChanges } from "../../lib/highlights/extractors";
 import {
-  DEFAULT_HOOK_PHRASES,
-  scoreWindows,
-  type Candidate,
-  type ScoreWindowsOptions,
-  type SignalName,
-} from "../../lib/highlights/score";
+  mergeConfig,
+  parseClipConfig,
+  resolveConfig,
+} from "../../lib/highlights/config";
+import { audioEnergy, sceneChanges } from "../../lib/highlights/extractors";
+import { scoreWindows, type Candidate, type ScoreWindowsOptions } from "../../lib/highlights/score";
 import { selectClips } from "../../lib/highlights/select";
 import { snapBoundaries } from "../../lib/highlights/snap";
 import type { TranscriptSegment } from "../../lib/transcribe/types";
 import type { JobHandler, JobContext } from "./index";
 
+// Config parsing/merging/defaults live in lib/highlights/config so the config
+// API and this handler share one validator. Re-exported here because tests and
+// earlier callers import them from the handler.
+export {
+  DEFAULT_CLIP_CONFIG,
+  parseClipConfig,
+  type ClipConfig,
+} from "../../lib/highlights/config";
+
 /** Longest a generated clip title may be (SPEC/Phase-04: "trimmed to 60 chars"). */
 export const TITLE_MAX = 60;
 
 /**
- * Tuning that drives one generate-clips run. Every field is optional so a job
- * payload (the regenerate API) can override just the knobs it cares about and
- * inherit the rest — which is what makes clip generation "config-live": change
- * `hookPhrases` and a different moment ranks first.
+ * Parse a project's stored `clip_config` JSON into clean overrides. The column
+ * is written by our own config API (already validated), but it is still text
+ * that could be hand-edited or corrupted, so a parse failure degrades to "no
+ * overrides" rather than crashing the job.
  */
-export interface ClipConfig {
-  /** Shortest clip, seconds (SPEC: 15–90). */
-  minLen?: number;
-  /** Longest clip, seconds. */
-  maxLen?: number;
-  /** Sliding-window length the scan uses, seconds. */
-  windowLen?: number;
-  /** Window step, seconds. */
-  step?: number;
-  /** Max clips to keep (SPEC: 5–10). */
-  count?: number;
-  /** Minimum seconds between two kept clips (SPEC: ≥5). */
-  minGap?: number;
-  /** Hook phrases that fire the hook signal. */
-  hookPhrases?: string[];
-  /** Per-signal weight overrides. */
-  weights?: Partial<Record<SignalName, number>>;
-}
-
-/** Config defaults — the neutral run when a project has no overrides yet. */
-export const DEFAULT_CLIP_CONFIG: Required<
-  Pick<ClipConfig, "minLen" | "maxLen" | "windowLen" | "step" | "count" | "minGap">
-> = {
-  minLen: 15,
-  maxLen: 90,
-  windowLen: 30,
-  step: 5,
-  count: 5,
-  minGap: 5,
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function num(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-/**
- * Read a {@link ClipConfig} out of an untrusted job payload, keeping only
- * well-typed fields. A payload is data crossing a boundary (SPEC: validate at
- * boundaries), so a stray `minLen: "20"` is dropped rather than smuggled into
- * the scoring arithmetic where it would surface as a silent NaN.
- */
-export function parseClipConfig(payload: unknown): ClipConfig {
-  if (!isRecord(payload)) return {};
-  const config: ClipConfig = {};
-
-  for (const key of ["minLen", "maxLen", "windowLen", "step", "count", "minGap"] as const) {
-    const value = num(payload[key]);
-    if (value !== undefined) config[key] = value;
+function projectClipConfig(raw: string | null) {
+  if (!raw) return {};
+  try {
+    return parseClipConfig(JSON.parse(raw));
+  } catch {
+    return {};
   }
-
-  if (Array.isArray(payload.hookPhrases)) {
-    const phrases = payload.hookPhrases.filter(
-      (p): p is string => typeof p === "string" && p.trim().length > 0,
-    );
-    if (phrases.length > 0) config.hookPhrases = phrases;
-  }
-
-  if (isRecord(payload.weights)) {
-    const weights: Partial<Record<SignalName, number>> = {};
-    for (const name of ["energy", "speechDensity", "hook", "emphasis", "laughter"] as const) {
-      const value = num(payload.weights[name]);
-      if (value !== undefined) weights[name] = value;
-    }
-    if (Object.keys(weights).length > 0) config.weights = weights;
-  }
-
-  return config;
-}
-
-/** Merge parsed overrides over the defaults into a fully-resolved config. */
-function resolveConfig(config: ClipConfig) {
-  return {
-    minLen: config.minLen ?? DEFAULT_CLIP_CONFIG.minLen,
-    maxLen: config.maxLen ?? DEFAULT_CLIP_CONFIG.maxLen,
-    windowLen: config.windowLen ?? DEFAULT_CLIP_CONFIG.windowLen,
-    step: config.step ?? DEFAULT_CLIP_CONFIG.step,
-    count: config.count ?? DEFAULT_CLIP_CONFIG.count,
-    minGap: config.minGap ?? DEFAULT_CLIP_CONFIG.minGap,
-    hookPhrases: config.hookPhrases ?? [...DEFAULT_HOOK_PHRASES],
-    weights: config.weights,
-  };
 }
 
 /** Cap a title at {@link TITLE_MAX} chars, marking truncation with an ellipsis. */
@@ -198,7 +128,12 @@ export function createGenerateClipsHandler(
       throw new Error(`Project ${project.id} ("${project.name}") has no source video to clip.`);
     }
 
-    const cfg = resolveConfig(parseClipConfig(job.payload));
+    // The project's stored config is the base; a per-run job payload (the
+    // regenerate API) layers on top of it. So a saved hook list applies to every
+    // regeneration, while a one-off payload can still override a single run.
+    const cfg = resolveConfig(
+      mergeConfig(projectClipConfig(project.clipConfig), parseClipConfig(job.payload)),
+    );
 
     setProgress(10);
     // Both signals come from the source video via ffmpeg (the only place media

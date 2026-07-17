@@ -41,7 +41,10 @@ describe("generate-clips handler", () => {
   });
 
   /** A transcribed, ready project with the fixture transcript already stored. */
-  function seedTranscribedProject(segments: TranscriptSegment[] = longSegments()): number {
+  function seedTranscribedProject(
+    segments: TranscriptSegment[] = longSegments(),
+    values: Partial<typeof projects.$inferInsert> = {},
+  ): number {
     const [row] = testDb.db
       .insert(projects)
       .values({
@@ -51,6 +54,7 @@ describe("generate-clips handler", () => {
         duration: 90,
         hasAudio: true,
         transcribed: true,
+        ...values,
       })
       .returning({ id: projects.id })
       .all();
@@ -153,6 +157,39 @@ describe("generate-clips handler", () => {
     // the newly-promoted top clip must contain it.
     expect(topRetention.inPoint).toBeLessThanOrEqual(47.294);
     expect(topRetention.outPoint).toBeGreaterThanOrEqual(48.07);
+  });
+
+  it("uses the project's stored clip_config as the base for a run", async () => {
+    // A saved hook list must apply to a plain (payload-less) run, exactly as the
+    // one-off payload did in the test above — this is what "stored per project"
+    // buys. windowLen 20 mirrors the payload variant so the two are comparable.
+    const withDefaults = await run(
+      seedTranscribedProject(longSegments(), { clipConfig: JSON.stringify({ windowLen: 20 }) }),
+      undefined,
+    );
+    const withStoredRetention = await run(
+      seedTranscribedProject(longSegments(), {
+        clipConfig: JSON.stringify({ windowLen: 20, hookPhrases: ["retention"] }),
+      }),
+      undefined,
+    );
+
+    expect(withStoredRetention[0].inPoint).not.toBe(withDefaults[0].inPoint);
+    expect(withStoredRetention[0].inPoint).toBeLessThanOrEqual(47.294);
+    expect(withStoredRetention[0].outPoint).toBeGreaterThanOrEqual(48.07);
+  });
+
+  it("lets a job payload override the project's stored config for a single run", async () => {
+    // Stored config says windowLen 20; the payload overrides it to 30. The
+    // override wins per-run without mutating what the project saved.
+    const id = seedTranscribedProject(longSegments(), {
+      clipConfig: JSON.stringify({ windowLen: 20, count: 5 }),
+    });
+    const rows = await run(id, { windowLen: 30 });
+    // At windowLen 30 the 90 s fixture fits ~2 clips (3*30+2*5 > 90); at 20 it
+    // fits more. Seeing ≤2 proves the payload's 30 won over the stored 20.
+    expect(rows.length).toBeLessThanOrEqual(2);
+    expect(rows.length).toBeGreaterThanOrEqual(1);
   });
 
   it("replaces candidate clips on regenerate but leaves manual clips untouched", async () => {

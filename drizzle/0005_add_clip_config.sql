@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `clip_config` text;
