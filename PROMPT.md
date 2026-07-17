@@ -62,7 +62,7 @@ checklist.
 - [x] Phase 01 — Scaffold, gates, fixtures (prompts/phase-01-scaffold.md)
 - [x] Phase 02 — Ingestion, jobs, worker (prompts/phase-02-ingest-jobs.md)
 - [x] Phase 03 — Transcription (prompts/phase-03-transcription.md)
-- [ ] Phase 04 — Highlight detection + auto-clipping (prompts/phase-04-highlights.md)
+- [x] Phase 04 — Highlight detection + auto-clipping (prompts/phase-04-highlights.md)
 - [ ] Phase 05 — Auto captions (prompts/phase-05-captions.md)
 - [ ] Phase 06 — Smart crop (prompts/phase-06-smart-crop.md)
 - [ ] Phase 07 — Timeline editor UI (prompts/phase-07-timeline-editor.md)

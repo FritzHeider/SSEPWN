@@ -72,9 +72,9 @@ feature — invest in making it deterministic and testable.
 - [x] Clip config stored per project + config API (GET/PUT clip-config)
 - [x] Clips APIs (list/add/delete/regenerate)
 - [x] Clips UI panel with range preview
-- [ ] All listed tests green
-- [ ] All acceptance criteria verified in one iteration
-- [ ] PHASE_COMPLETE
+- [x] All listed tests green
+- [x] All acceptance criteria verified in one iteration
+- [x] PHASE_COMPLETE
 
 ## Completion signal (ralph-orchestrator)
 
