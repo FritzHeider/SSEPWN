@@ -62,7 +62,7 @@ Read `SPEC.md` first. Prerequisite: Phase 04 complete.
 - [x] Style model + 4 presets
 - [x] toAss with karaoke tags
 - [x] burnIn ffmpeg function + integration test
-- [ ] Caption edit API (text/timing/style) with clip-local isolation
+- [x] Caption edit API (text/timing/style) with clip-local isolation
 - [ ] Clip editor caption UI with live styled preview
 - [ ] All listed tests green
 - [ ] All acceptance criteria verified in one iteration
