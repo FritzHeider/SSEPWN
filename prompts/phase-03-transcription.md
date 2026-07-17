@@ -63,9 +63,10 @@ Read `SPEC.md` first. Prerequisite: Phase 02 complete.
 - [x] FakeTranscriber resolves fixtures across the upload UUID rename
 - [x] Source-video route (`GET /api/projects/:id/video`) with HTTP Range/206
 - [x] Project page (`/projects/[id]`) + transcript panel with seek-on-click
-- [ ] All listed tests green with no whisper binary present
-- [ ] All acceptance criteria verified in one iteration
-- [ ] PHASE_COMPLETE
+- [x] Real-whisper smoke test, skipped unless `WHISPER_SMOKE=1`
+- [x] All listed tests green with no whisper binary present
+- [x] All acceptance criteria verified in one iteration
+- [x] PHASE_COMPLETE
 
 ## Completion signal (ralph-orchestrator)
 

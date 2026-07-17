@@ -78,6 +78,19 @@ Audio is resampled to 16 kHz mono WAV before whisper sees it — it accepts
 nothing else. A missing binary or model fails with a message naming the env
 var to set.
 
+Once whisper is set up you can smoke-test the real binary. It is skipped by
+default — `npm test` never spawns whisper — and opt-in rather than
+auto-detected, so that "whisper is broken" can never be mistaken for "whisper
+is absent":
+
+```bash
+WHISPER_SMOKE=1 npm test    # plus WHISPER_BIN/WHISPER_MODEL if not the defaults
+```
+
+It asserts the binary spawns, accepts our arg array, and emits JSON the parser
+still reads — not any particular words, since the generated fixtures are sine
+tones with no speech in them.
+
 ## Repo layout
 
 - `src/lib/ffmpeg/` — all FFmpeg/ffprobe invocations (execa arg arrays only)
