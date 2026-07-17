@@ -1,4 +1,5 @@
 import type { Job, JobsDb } from "../../lib/jobs";
+import { createIngestHandler } from "./ingest";
 
 /** Everything a handler is allowed to touch. */
 export interface JobContext {
@@ -22,4 +23,6 @@ export type HandlerRegistry = Record<string, JobHandler>;
  * (ingest in Phase 02, transcribe in Phase 03, …); the worker loop itself does
  * not change.
  */
-export const handlers: HandlerRegistry = {};
+export const handlers: HandlerRegistry = {
+  ingest: createIngestHandler(),
+};

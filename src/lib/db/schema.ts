@@ -8,8 +8,20 @@ export const projects = sqliteTable("projects", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   sourceVideoPath: text("source_video_path"),
+  // created | uploaded | ready | failed
   status: text("status").notNull().default("created"),
   platformPreset: text("platform_preset"),
+  /** Human-readable reason the project is `failed`; cleared when it turns `ready`. */
+  error: text("error"),
+  // Source metadata, written by the ingest handler once ffprobe has run
+  // (SPEC.md § Feature checklist 1). Null until then.
+  duration: real("duration"), // seconds
+  width: integer("width"),
+  height: integer("height"),
+  fps: real("fps"),
+  hasAudio: integer("has_audio", { mode: "boolean" }),
+  /** Poster frame generated at ingest. */
+  thumbnailPath: text("thumbnail_path"),
   createdAt: integer("created_at")
     .notNull()
     .default(sql`(unixepoch())`),
