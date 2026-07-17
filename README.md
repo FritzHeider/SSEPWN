@@ -12,7 +12,10 @@ no Redis, no API keys, no GPU.
 ## Prerequisites
 
 - Node.js 20+
-- `ffmpeg` and `ffprobe` on PATH (test fixtures are generated with them)
+- `ffmpeg` and `ffprobe` on PATH (test fixtures are generated with them).
+  Caption burn-in (`burnIn`, the `ass` filter) needs an ffmpeg built with
+  **libass**; most distributions ship it (`brew install ffmpeg`), but a minimal
+  build without it will skip the burn-in integration test rather than fail.
 - `sqlite3` CLI (optional, for inspecting the database)
 
 ## Setup
