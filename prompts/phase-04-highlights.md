@@ -68,7 +68,7 @@ feature — invest in making it deterministic and testable.
 - [x] scoreWindows with per-signal breakdown
 - [x] snapBoundaries (sentence/scene snapping, never mid-word)
 - [x] selectClips top-N non-overlapping
-- [ ] generate-clips job handler + pipeline wiring
+- [x] generate-clips job handler + pipeline wiring
 - [ ] Clip config per project + APIs (list/add/delete/regenerate)
 - [ ] Clips UI panel with range preview
 - [ ] All listed tests green

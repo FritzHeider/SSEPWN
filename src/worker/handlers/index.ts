@@ -1,4 +1,5 @@
 import type { Job, JobsDb } from "../../lib/jobs";
+import { createGenerateClipsHandler } from "./generate-clips";
 import { createIngestHandler } from "./ingest";
 import { createTranscribeHandler } from "./transcribe";
 
@@ -21,10 +22,11 @@ export type HandlerRegistry = Record<string, JobHandler>;
 
 /**
  * Job type → handler. Later phases extend the pipeline by adding entries here
- * (ingest in Phase 02, transcribe in Phase 03, …); the worker loop itself does
- * not change.
+ * (ingest in Phase 02, transcribe in Phase 03, generate-clips in Phase 04, …);
+ * the worker loop itself does not change.
  */
 export const handlers: HandlerRegistry = {
   ingest: createIngestHandler(),
   transcribe: createTranscribeHandler(),
+  "generate-clips": createGenerateClipsHandler(),
 };

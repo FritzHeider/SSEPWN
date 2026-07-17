@@ -9,6 +9,7 @@ import { jobs, projects, transcripts } from "../src/lib/db/schema";
 import type { Job } from "../src/lib/jobs";
 import { createJobQueue } from "../src/lib/jobs";
 import type { TranscriptSegment } from "../src/lib/transcribe/types";
+import { createGenerateClipsHandler } from "../src/worker/handlers/generate-clips";
 import { createIngestHandler } from "../src/worker/handlers/ingest";
 import { createTranscribeHandler } from "../src/worker/handlers/transcribe";
 import { createTestDb, openTestDb, type TestDb } from "./helpers/db";
@@ -73,6 +74,9 @@ async function runQueuedJobs(): Promise<void> {
   const registry: Record<string, (ctx: { job: Job; db: typeof routeDb.db; setProgress: (n: number) => void }) => Promise<void>> = {
     ingest: createIngestHandler({ dir: () => thumbDir }),
     transcribe: createTranscribeHandler(),
+    // Phase-04 extends the pipeline: transcribe hands off to generate-clips.
+    // Drained with the real ffmpeg extractors so the full chain is exercised.
+    "generate-clips": createGenerateClipsHandler(),
   };
 
   for (let job = queue.claimNext(); job; job = queue.claimNext()) {
@@ -135,7 +139,8 @@ describe("upload → ingest → transcribe (TRANSCRIBER default, real upload ren
     expect(words[words.length - 1].end).toBeLessThanOrEqual(stored.duration ?? 0);
 
     const queued = routeDb.db.select().from(jobs).where(eq(jobs.projectId, project.id)).all();
-    expect(queued.map((job) => job.type)).toEqual(["ingest", "transcribe"]);
+    // The full phase-04 pipeline: ingest → transcribe → generate-clips.
+    expect(queued.map((job) => job.type)).toEqual(["ingest", "transcribe", "generate-clips"]);
     expect(queued.every((job) => job.status === "done")).toBe(true);
   }, 60_000);
 

@@ -10,5 +10,11 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts", "src/**/*.test.ts"],
+    // Several integration tests shell out to ffmpeg (scene detection decodes
+    // every frame, ~5 s on the fixture) and run in parallel, so they compete
+    // for CPU. The 5 s default races that real work; 30 s is slack for the
+    // media subprocesses without hiding a genuine hang. Unit tests finish in
+    // milliseconds regardless.
+    testTimeout: 30_000,
   },
 });

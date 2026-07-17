@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import { projects, transcripts } from "../../lib/db/schema";
+import { createJobQueue } from "../../lib/jobs";
 import { createTranscriber } from "../../lib/transcribe/factory";
 import type { Transcriber } from "../../lib/transcribe/types";
 import type { JobHandler, JobContext } from "./index";
@@ -87,5 +88,11 @@ export function createTranscribeHandler(options: TranscribeHandlerOptions = {}):
         .where(eq(projects.id, project.id))
         .run();
     });
+
+    // Hand off to phase-04. Only reached on the has-audio path, so a transcript
+    // exists to score; the no-audio branch above returns before here and never
+    // queues a clip job that would find nothing to clip. Queued after the commit
+    // so generate-clips reads a transcript that is already written.
+    createJobQueue(db).enqueue("generate-clips", project.id);
   };
 }
