@@ -66,7 +66,7 @@ feature — invest in making it deterministic and testable.
 
 - [x] audioEnergy + sceneChanges extractors
 - [x] scoreWindows with per-signal breakdown
-- [ ] snapBoundaries (sentence/scene snapping, never mid-word)
+- [x] snapBoundaries (sentence/scene snapping, never mid-word)
 - [ ] selectClips top-N non-overlapping
 - [ ] generate-clips job handler + pipeline wiring
 - [ ] Clip config per project + APIs (list/add/delete/regenerate)
