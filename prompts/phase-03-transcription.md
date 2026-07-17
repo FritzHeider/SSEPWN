@@ -59,7 +59,8 @@ Read `SPEC.md` first. Prerequisite: Phase 02 complete.
 - [x] FakeTranscriber + rich 90 s fixture transcript JSON
 - [x] Factory + env selection
 - [x] transcribe job handler wired into pipeline after ingest
-- [ ] Transcript API + UI panel with seek-on-click
+- [ ] Transcript API (`GET /api/projects/:id/transcript`) + pure panel logic
+- [ ] Source-video route (Range) + project page transcript panel with seek-on-click
 - [ ] All listed tests green with no whisper binary present
 - [ ] All acceptance criteria verified in one iteration
 - [ ] PHASE_COMPLETE
