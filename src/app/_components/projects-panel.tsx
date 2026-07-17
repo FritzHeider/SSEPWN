@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -164,10 +165,18 @@ function ProjectRow({ project }: { project: ProjectView }) {
   const resolution = formatResolution(project.width, project.height);
 
   return (
-    <li className="flex items-center gap-4 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+    <li className="flex items-center gap-4 rounded-lg border border-zinc-200 p-3 transition-colors hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700">
       <Poster project={project} />
       <div className="flex min-w-0 flex-col gap-1">
-        <span className="truncate font-medium text-zinc-900 dark:text-zinc-100">{project.name}</span>
+        {/* The whole row is not the link: `after:absolute` overlay tricks are how
+            that is usually done, and they swallow the text selection people use
+            to copy a filename. A link on the name is the part they aim at. */}
+        <Link
+          href={`/projects/${project.id}`}
+          className="truncate font-medium text-zinc-900 hover:underline dark:text-zinc-100"
+        >
+          {project.name}
+        </Link>
         <span className="text-sm text-zinc-500 dark:text-zinc-400">
           {duration === EMPTY && resolution === EMPTY ? "Probing…" : `${duration} · ${resolution}`}
         </span>

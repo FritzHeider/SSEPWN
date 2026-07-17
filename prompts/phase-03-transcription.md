@@ -62,7 +62,7 @@ Read `SPEC.md` first. Prerequisite: Phase 02 complete.
 - [x] Transcript API (`GET /api/projects/:id/transcript`) + pure panel logic
 - [x] FakeTranscriber resolves fixtures across the upload UUID rename
 - [x] Source-video route (`GET /api/projects/:id/video`) with HTTP Range/206
-- [ ] Project page (`/projects/[id]`) + transcript panel with seek-on-click
+- [x] Project page (`/projects/[id]`) + transcript panel with seek-on-click
 - [ ] All listed tests green with no whisper binary present
 - [ ] All acceptance criteria verified in one iteration
 - [ ] PHASE_COMPLETE

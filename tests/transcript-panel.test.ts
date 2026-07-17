@@ -1,8 +1,15 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { FakeTranscriber } from "../src/lib/transcribe/fake";
-import { NO_ACTIVE_SEGMENT, activeSegmentIndex, formatTimestamp } from "../src/lib/transcribe/panel";
+import {
+  NO_ACTIVE_SEGMENT,
+  activeSegmentIndex,
+  emptyTranscriptMessage,
+  formatTimestamp,
+  sourceVideoUrl,
+} from "../src/lib/transcribe/panel";
 import type { TranscriptSegment } from "../src/lib/transcribe/types";
+import { NO_AUDIO_NOTE } from "../src/worker/handlers/transcribe";
 
 /**
  * The real 90 s fixture, loaded through the real FakeTranscriber — the same data
@@ -101,5 +108,71 @@ describe("activeSegmentIndex", () => {
 
   it("returns no active segment for an empty transcript", () => {
     expect(activeSegmentIndex([], 1)).toBe(NO_ACTIVE_SEGMENT);
+  });
+});
+
+describe("sourceVideoUrl", () => {
+  it("points at the project's video route", () => {
+    expect(sourceVideoUrl(7)).toBe("/api/projects/7/video");
+  });
+});
+
+describe("emptyTranscriptMessage", () => {
+  it("says nothing when there are sentences to render", () => {
+    expect(
+      emptyTranscriptMessage({ transcribed: true, statusNote: null, segments: fixture }),
+    ).toBeNull();
+  });
+
+  // A statusNote alongside real segments is not a reason to suppress them: the
+  // note explains an absence, and there is no absence here.
+  it("says nothing when there are sentences even if a status note is set", () => {
+    expect(
+      emptyTranscriptMessage({ transcribed: false, statusNote: NO_AUDIO_NOTE, segments: fixture }),
+    ).toBeNull();
+  });
+
+  // The whole reason readTranscript answers 200-with-reason instead of 404: the
+  // note the transcribe handler wrote has to reach the user. Imported from the
+  // handler rather than retyped, so a reworded note cannot leave this green while
+  // the panel shows stale copy.
+  it("surfaces the handler's own note for a project with no audio", () => {
+    expect(emptyTranscriptMessage({ transcribed: false, statusNote: NO_AUDIO_NOTE, segments: [] })).toBe(
+      NO_AUDIO_NOTE,
+    );
+  });
+
+  it("prefers the status note over the transcribed flag when both are present", () => {
+    // The disagreeing cell: transcribed=true says "finished", the note says what
+    // actually happened. An implementation reading only the flag reports "no
+    // speech detected" here and buries the real reason.
+    expect(emptyTranscriptMessage({ transcribed: true, statusNote: NO_AUDIO_NOTE, segments: [] })).toBe(
+      NO_AUDIO_NOTE,
+    );
+  });
+
+  it("reports work in progress when the job has not run yet", () => {
+    const message = emptyTranscriptMessage({ transcribed: false, statusNote: null, segments: [] });
+
+    expect(message).toMatch(/transcribing/i);
+  });
+
+  // Transcribed, no note, no segments is a transcript of silence — a real
+  // outcome for an audio track with no speech. Reporting it as "Transcribing…"
+  // would promise an update that is never coming.
+  it("distinguishes a finished-but-silent transcript from one still running", () => {
+    const silent = emptyTranscriptMessage({ transcribed: true, statusNote: null, segments: [] });
+    const pending = emptyTranscriptMessage({ transcribed: false, statusNote: null, segments: [] });
+
+    expect(silent).toMatch(/no speech/i);
+    expect(silent).not.toBe(pending);
+  });
+
+  // A note written as whitespace is an empty note; it must fall through to the
+  // flag rather than render a blank box the user cannot interpret.
+  it("treats a blank status note as no note at all", () => {
+    expect(emptyTranscriptMessage({ transcribed: false, statusNote: "   ", segments: [] })).toMatch(
+      /transcribing/i,
+    );
   });
 });
