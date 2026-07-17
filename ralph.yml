@@ -1,0 +1,38 @@
+# Ralph Orchestrator config for the Sseclone build
+# Run a phase:      ralph run -P prompts/phase-01-scaffold.md --max-iterations 15
+# Run masterprompt: ralph run -P PROMPT.md --max-iterations 100 \
+#                     --completion-promise "ALL_PHASES_COMPLETE"
+
+event_loop:
+  prompt_file: "PROMPT.md"          # default; override per phase with -P
+  completion_promise: "LOOP_COMPLETE"
+  max_iterations: 25                # override per run with --max-iterations
+  max_runtime_seconds: 14400        # 4 h hard stop
+  idle_timeout_secs: 1800
+  checkpoint_interval: 5
+
+cli:
+  backend: "claude"
+  prompt_mode: "arg"
+
+core:
+  scratchpad:
+    enabled: true
+    path: .ralph/agent/scratchpad.md
+  guardrails:
+    - "Read SPEC.md every iteration; it is the only source of truth for features and stack"
+    - "npm run lint, npm run typecheck, and npm test must pass before every commit"
+    - "Existing tests are the contract — never weaken, skip, or delete them to satisfy a gate"
+    - "No Redis, Docker, Postgres, paid APIs, API keys, or GPU dependencies"
+    - "Never commit binary media; test fixtures come from scripts/make-fixtures.sh"
+    - "Commit working increments; never end an iteration with uncommitted work"
+    - "Finish in-progress checklist items before starting new ones; split oversized items and exit"
+    - "Every iteration output must state files changed, checklist items flipped, and gate results"
+
+memories:
+  enabled: true
+  inject: auto
+  budget: 2000
+
+tasks:
+  enabled: true

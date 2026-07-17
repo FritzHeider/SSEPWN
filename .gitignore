@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+next-env.d.ts
+
+# Production build artifacts
+dist/
+build/
+
+# Runtime data (SQLite DB, uploads, thumbnails, exports) — never commit media
+data/
+
+# Generated test fixtures (recreate with: npm run fixtures)
+fixtures/
+
+# ML models downloaded for smart crop / whisper (large binaries)
+models/
+*.bin
+*.gguf
+*.onnx
+
+# Ralph orchestrator state (scratchpads, logs, metrics, specs cache)
+.ralph/
+.agent/
+
+# Test output
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# Environment / secrets — never commit keys
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Temp render intermediates
+tmp/
+*.tmp
