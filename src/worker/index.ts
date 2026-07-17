@@ -1,10 +1,29 @@
 /**
- * Sseclone worker process — polls the SQLite-backed `jobs` table and runs
- * media processing tasks. Job polling and handlers arrive in Phase 02;
- * this placeholder only proves the `npm run worker` entrypoint is wired.
+ * Sseclone worker process (`npm run worker`) — the only place long-running
+ * media work happens; API handlers just enqueue jobs and read status.
  */
-function main(): void {
-  console.log("[worker] placeholder started — job polling arrives in Phase 02");
+import { db } from "../lib/db";
+import { createJobQueue } from "../lib/jobs";
+import { handlers } from "./handlers";
+import { createWorker } from "./loop";
+
+async function main(): Promise<void> {
+  const worker = createWorker({ queue: createJobQueue(db), db, handlers });
+
+  let shuttingDown = false;
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[worker] ${signal} received — finishing current job, then exiting`);
+    void worker.stop();
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+  await worker.start();
 }
 
-main();
+main().catch((error: unknown) => {
+  console.error("[worker] fatal:", error);
+  process.exitCode = 1;
+});
