@@ -2,6 +2,7 @@
   "name": "sseclone",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "overrides": {
     "postcss": "^8.5.10",
     "esbuild": "^0.25.0"
