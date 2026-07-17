@@ -63,7 +63,10 @@ Read `SPEC.md` first. Prerequisite: Phase 01 complete.
 - [x] Upload API with streaming + validation
 - [x] Ingest handler (probe, thumbnail, status transitions)
 - [x] Status/read APIs
-- [ ] Upload + project list UI
+- [x] Poster thumbnail serving route (`GET /api/projects/:id/thumbnail`) —
+      `data/` is outside `public/`, so the list UI needs an HTTP surface for the
+      poster bytes before it can render a thumbnail
+- [ ] Upload + project list UI page (drag-drop, status badge + thumbnail, polling)
 - [ ] All listed tests written and green
 - [ ] All acceptance criteria verified in one iteration
 - [ ] PHASE_COMPLETE
