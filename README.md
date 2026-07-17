@@ -45,8 +45,13 @@ whisper binary and no model present.
 
 | Env var | Default | What it is |
 |---|---|---|
+| `TRANSCRIBER` | `fake` under `NODE_ENV=test`, else `whisper` | Which implementation to use: `fake` replays a checked-in transcript, `whisper` runs the real binary |
 | `WHISPER_BIN` | `whisper-cli` | Path to the built whisper.cpp CLI |
 | `WHISPER_MODEL` | `models/ggml-base.en.bin` | Path to a ggml model file |
+
+`TRANSCRIBER=fake` replays `tests/samples/transcripts/<media-basename>.json`, which
+is how the suite runs without whisper. An unrecognised value is a startup error
+rather than a silent fallback, so a typo cannot quietly reach the real binary.
 
 Only needed to transcribe for real (`npm run worker`):
 
