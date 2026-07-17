@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ProjectClip } from "@/lib/projects/clips";
@@ -228,6 +229,13 @@ export function ClipsPanel({
                       </div>
                     ) : null}
                   </button>
+                  <Link
+                    href={`/clips/${clip.id}`}
+                    aria-label={`Edit captions for ${clipTitle(clip)}`}
+                    className="shrink-0 rounded-md px-2 py-1 text-xs text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                  >
+                    Captions
+                  </Link>
                   <button
                     type="button"
                     onClick={() => deleteClip(clip.id)}
