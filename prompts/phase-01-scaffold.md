@@ -60,7 +60,7 @@ importantly — the backpressure gates every later phase depends on.
 - [x] Next.js + TS strict + Tailwind + ESLint scaffold
 - [x] npm scripts wired (dev/build/lint/typecheck/test/worker/fixtures/db:migrate)
 - [x] Drizzle schema + migration for all SPEC tables
-- [ ] ffmpeg exec wrapper + probe with types
+- [x] ffmpeg exec wrapper + probe with types
 - [ ] make-fixtures.sh generating all five fixtures, idempotent
 - [ ] ffmpeg probe integration tests green
 - [ ] README runnable end-to-end on a fresh machine
