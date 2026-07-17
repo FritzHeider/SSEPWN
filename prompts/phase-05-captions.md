@@ -58,7 +58,7 @@ Read `SPEC.md` first. Prerequisite: Phase 04 complete.
 
 ## Status
 
-- [ ] clipCaptions slice/re-base + line grouping
+- [x] clipCaptions slice/re-base + line grouping
 - [ ] Style model + 4 presets
 - [ ] toAss with karaoke tags
 - [ ] burnIn ffmpeg function + integration test
