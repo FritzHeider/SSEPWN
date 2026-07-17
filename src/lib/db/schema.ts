@@ -13,6 +13,14 @@ export const projects = sqliteTable("projects", {
   platformPreset: text("platform_preset"),
   /** Human-readable reason the project is `failed`; cleared when it turns `ready`. */
   error: text("error"),
+  /**
+   * Non-fatal note about a pipeline step that was skipped, e.g. "no audio —
+   * captions unavailable". Distinct from `error`: the project still works, it
+   * just has less in it. Null when there is nothing to say.
+   */
+  statusNote: text("status_note"),
+  /** True once a transcript has been written for this project (phase-03). */
+  transcribed: integer("transcribed", { mode: "boolean" }).notNull().default(false),
   // Source metadata, written by the ingest handler once ffprobe has run
   // (SPEC.md § Feature checklist 1). Null until then.
   duration: real("duration"), // seconds

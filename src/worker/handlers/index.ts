@@ -1,5 +1,6 @@
 import type { Job, JobsDb } from "../../lib/jobs";
 import { createIngestHandler } from "./ingest";
+import { createTranscribeHandler } from "./transcribe";
 
 /** Everything a handler is allowed to touch. */
 export interface JobContext {
@@ -25,4 +26,5 @@ export type HandlerRegistry = Record<string, JobHandler>;
  */
 export const handlers: HandlerRegistry = {
   ingest: createIngestHandler(),
+  transcribe: createTranscribeHandler(),
 };

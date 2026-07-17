@@ -58,7 +58,7 @@ Read `SPEC.md` first. Prerequisite: Phase 02 complete.
 - [x] WhisperCppTranscriber (wav extract, spawn, parse, errors)
 - [x] FakeTranscriber + rich 90 s fixture transcript JSON
 - [x] Factory + env selection
-- [ ] transcribe job handler wired into pipeline after ingest
+- [x] transcribe job handler wired into pipeline after ingest
 - [ ] Transcript API + UI panel with seek-on-click
 - [ ] All listed tests green with no whisper binary present
 - [ ] All acceptance criteria verified in one iteration

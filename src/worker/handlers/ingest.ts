@@ -4,6 +4,7 @@ import path from "node:path";
 import { projects } from "../../lib/db/schema";
 import { probe, type ProbeResult } from "../../lib/ffmpeg/exec";
 import { generateThumbnail, posterTimestamp } from "../../lib/ffmpeg/thumbnail";
+import { createJobQueue } from "../../lib/jobs";
 import type { JobHandler, JobContext } from "./index";
 
 /** Where poster frames land; overridable so tests never write into the real data dir. */
@@ -101,6 +102,16 @@ export function createIngestHandler(options: IngestHandlerOptions = {}): JobHand
         })
         .where(eq(projects.id, project.id))
         .run();
+
+      // Hand off to phase-03. This sits INSIDE the try and after the metadata
+      // write on purpose: a transcribe job queued for a project whose probe
+      // failed would run against null metadata and fail a second time for a
+      // reason that has nothing to do with transcription.
+      //
+      // Projects with no audio are enqueued too — the transcribe handler is what
+      // records the "no audio" note, so skipping the enqueue would mean the skip
+      // is never written down.
+      createJobQueue(db).enqueue("transcribe", project.id);
     } catch (error) {
       db.update(projects)
         .set({ status: "failed", error: describeFailure(project.name, error) })
