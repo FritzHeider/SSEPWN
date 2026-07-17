@@ -10,13 +10,25 @@ export interface ProbeResult {
   hasAudio: boolean;
 }
 
+export interface AudioProbeResult {
+  /** Samples per second, e.g. 16000. */
+  sampleRate: number;
+  channels: number;
+  codec: string;
+  /** Duration in seconds. */
+  duration: number;
+}
+
 interface FfprobeStream {
   codec_type?: string;
+  codec_name?: string;
   width?: number;
   height?: number;
   r_frame_rate?: string;
   avg_frame_rate?: string;
   duration?: string;
+  sample_rate?: string;
+  channels?: number;
 }
 
 interface FfprobeOutput {
@@ -63,6 +75,7 @@ export async function probe(path: string): Promise<ProbeResult> {
     throw new Error(`No video stream found in ${path}`);
   }
 
+
   const duration = Number(parsed.format?.duration ?? video.duration ?? 0);
 
   return {
@@ -71,5 +84,39 @@ export async function probe(path: string): Promise<ProbeResult> {
     height: video.height ?? 0,
     fps: parseFps(video.avg_frame_rate) || parseFps(video.r_frame_rate),
     hasAudio: streams.some((s) => s.codec_type === "audio"),
+  };
+}
+
+/**
+ * Probe the first audio stream of a file.
+ *
+ * Separate from `probe()` because that one insists on a video stream — it
+ * cannot describe a bare WAV, which is exactly what the transcription pipeline
+ * produces and needs to verify.
+ *
+ * Rejects if ffprobe fails or the file has no audio stream.
+ */
+export async function probeAudio(path: string): Promise<AudioProbeResult> {
+  const { stdout } = await execa("ffprobe", [
+    "-v",
+    "error",
+    "-print_format",
+    "json",
+    "-show_format",
+    "-show_streams",
+    path,
+  ]);
+
+  const parsed = JSON.parse(stdout) as FfprobeOutput;
+  const audio = (parsed.streams ?? []).find((s) => s.codec_type === "audio");
+  if (!audio) {
+    throw new Error(`No audio stream found in ${path}`);
+  }
+
+  return {
+    sampleRate: Number(audio.sample_rate ?? 0),
+    channels: audio.channels ?? 0,
+    codec: audio.codec_name ?? "",
+    duration: Number(parsed.format?.duration ?? audio.duration ?? 0),
   };
 }

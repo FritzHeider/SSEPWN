@@ -54,8 +54,8 @@ Read `SPEC.md` first. Prerequisite: Phase 02 complete.
 
 ## Status
 
-- [ ] Transcriber interface + types
-- [ ] WhisperCppTranscriber (wav extract, spawn, parse, errors)
+- [x] Transcriber interface + types
+- [x] WhisperCppTranscriber (wav extract, spawn, parse, errors)
 - [ ] FakeTranscriber + rich 90 s fixture transcript JSON
 - [ ] Factory + env selection
 - [ ] transcribe job handler wired into pipeline after ingest

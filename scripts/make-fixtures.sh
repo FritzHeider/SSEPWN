@@ -36,6 +36,23 @@ if [ -f fixtures/short-sample.mp4 ]; then skip short-sample.mp4; else
   made short-sample.mp4
 fi
 
+# stereo-sample.mp4 — 3 s, STEREO 48 kHz audio.
+# Deliberately neither mono nor 16 kHz: every other fixture is already mono
+# 44.1 kHz, so a WAV extractor that dropped `-ac 1` would still emit mono and
+# the test would pass while proving nothing. Downmix + resample are only
+# observable against a source that differs on BOTH axes.
+if [ -f fixtures/stereo-sample.mp4 ]; then skip stereo-sample.mp4; else
+  ffmpeg -hide_banner -loglevel error -y \
+    -f lavfi -i "testsrc2=size=640x360:rate=30:duration=3" \
+    -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=3" \
+    -f lavfi -i "sine=frequency=880:sample_rate=48000:duration=3" \
+    -filter_complex "[1:a][2:a]join=inputs=2:channel_layout=stereo[a]" \
+    -map 0:v -map "[a]" \
+    -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -ar 48000 \
+    fixtures/stereo-sample.mp4
+  made stereo-sample.mp4
+fi
+
 # no-audio.mp4 — 5 s, video only.
 if [ -f fixtures/no-audio.mp4 ]; then skip no-audio.mp4; else
   ffmpeg -hide_banner -loglevel error -y \

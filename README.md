@@ -37,6 +37,35 @@ npm test             # vitest unit + integration suite
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` / `npm run test:watch` | Vitest |
 
+## Transcription
+
+Transcription runs through the `Transcriber` interface (`src/lib/transcribe/`),
+so the test suite never needs whisper installed — `npm test` passes with no
+whisper binary and no model present.
+
+| Env var | Default | What it is |
+|---|---|---|
+| `WHISPER_BIN` | `whisper-cli` | Path to the built whisper.cpp CLI |
+| `WHISPER_MODEL` | `models/ggml-base.en.bin` | Path to a ggml model file |
+
+Only needed to transcribe for real (`npm run worker`):
+
+```bash
+# 1. build whisper.cpp (see https://github.com/ggerganov/whisper.cpp)
+git clone https://github.com/ggerganov/whisper.cpp && cd whisper.cpp && cmake -B build && cmake --build build -j
+
+# 2. download a model — base.en is a good speed/quality default
+sh ./models/download-ggml-model.sh base.en
+
+# 3. point Sseclone at both (models/ and *.bin are gitignored)
+export WHISPER_BIN=/path/to/whisper.cpp/build/bin/whisper-cli
+export WHISPER_MODEL=/path/to/whisper.cpp/models/ggml-base.en.bin
+```
+
+Audio is resampled to 16 kHz mono WAV before whisper sees it — it accepts
+nothing else. A missing binary or model fails with a message naming the env
+var to set.
+
 ## Repo layout
 
 - `src/lib/ffmpeg/` — all FFmpeg/ffprobe invocations (execa arg arrays only)

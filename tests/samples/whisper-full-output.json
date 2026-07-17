@@ -1,0 +1,163 @@
+{
+  "systeminfo": "AVX = 1 | AVX2 = 1 | NEON = 0 | METAL = 0 | F16C = 1 |",
+  "model": {
+    "type": "base.en",
+    "multilingual": false,
+    "vocab": 51864,
+    "audio": { "ctx": 1500, "state": 512, "head": 8, "layer": 6 },
+    "text": { "ctx": 448, "state": 512, "head": 8, "layer": 6 },
+    "mels": 80,
+    "ftype": 1
+  },
+  "params": { "model": "models/ggml-base.en.bin", "language": "en", "translate": false },
+  "result": { "language": "en" },
+  "transcription": [
+    {
+      "timestamps": { "from": "00:00:00,000", "to": "00:00:02,560" },
+      "offsets": { "from": 0, "to": 2560 },
+      "text": " Here's the secret nobody tells you.",
+      "tokens": [
+        {
+          "text": "[_BEG_]",
+          "timestamps": { "from": "00:00:00,000", "to": "00:00:00,000" },
+          "offsets": { "from": 0, "to": 0 },
+          "id": 50363,
+          "p": 0.712
+        },
+        {
+          "text": " Here's",
+          "timestamps": { "from": "00:00:00,000", "to": "00:00:00,320" },
+          "offsets": { "from": 0, "to": 320 },
+          "id": 1692,
+          "p": 0.945
+        },
+        {
+          "text": " the",
+          "timestamps": { "from": "00:00:00,320", "to": "00:00:00,540" },
+          "offsets": { "from": 320, "to": 540 },
+          "id": 264,
+          "p": 0.981
+        },
+        {
+          "text": " secret",
+          "timestamps": { "from": "00:00:00,540", "to": "00:00:01,100" },
+          "offsets": { "from": 540, "to": 1100 },
+          "id": 4054,
+          "p": 0.972
+        },
+        {
+          "text": " nob",
+          "timestamps": { "from": "00:00:01,100", "to": "00:00:01,340" },
+          "offsets": { "from": 1100, "to": 1340 },
+          "id": 5715,
+          "p": 0.889
+        },
+        {
+          "text": "ody",
+          "timestamps": { "from": "00:00:01,340", "to": "00:00:01,600" },
+          "offsets": { "from": 1340, "to": 1600 },
+          "id": 1116,
+          "p": 0.934
+        },
+        {
+          "text": " tells",
+          "timestamps": { "from": "00:00:01,600", "to": "00:00:02,080" },
+          "offsets": { "from": 1600, "to": 2080 },
+          "id": 5112,
+          "p": 0.958
+        },
+        {
+          "text": " you",
+          "timestamps": { "from": "00:00:02,080", "to": "00:00:02,400" },
+          "offsets": { "from": 2080, "to": 2400 },
+          "id": 291,
+          "p": 0.991
+        },
+        {
+          "text": ".",
+          "timestamps": { "from": "00:00:02,400", "to": "00:00:02,560" },
+          "offsets": { "from": 2400, "to": 2560 },
+          "id": 13,
+          "p": 0.877
+        },
+        {
+          "text": "[_TT_128]",
+          "timestamps": { "from": "00:00:02,560", "to": "00:00:02,560" },
+          "offsets": { "from": 2560, "to": 2560 },
+          "id": 50491,
+          "p": 0.605
+        }
+      ]
+    },
+    {
+      "timestamps": { "from": "00:00:02,560", "to": "00:00:05,120" },
+      "offsets": { "from": 2560, "to": 5120 },
+      "text": " That result was unbelievable. [laughter]",
+      "tokens": [
+        {
+          "text": " That",
+          "timestamps": { "from": "00:00:02,560", "to": "00:00:02,880" },
+          "offsets": { "from": 2560, "to": 2880 },
+          "id": 883,
+          "p": 0.962
+        },
+        {
+          "text": " result",
+          "timestamps": { "from": "00:00:02,880", "to": "00:00:03,280" },
+          "offsets": { "from": 2880, "to": 3280 },
+          "id": 1874,
+          "p": 0.955
+        },
+        {
+          "text": " was",
+          "timestamps": { "from": "00:00:03,280", "to": "00:00:03,520" },
+          "offsets": { "from": 3280, "to": 3520 },
+          "id": 390,
+          "p": 0.987
+        },
+        {
+          "text": " unbeliev",
+          "timestamps": { "from": "00:00:03,520", "to": "00:00:04,000" },
+          "offsets": { "from": 3520, "to": 4000 },
+          "id": 24467,
+          "p": 0.901
+        },
+        {
+          "text": "able",
+          "timestamps": { "from": "00:00:04,000", "to": "00:00:04,320" },
+          "offsets": { "from": 4000, "to": 4320 },
+          "id": 712,
+          "p": 0.943
+        },
+        {
+          "text": ".",
+          "timestamps": { "from": "00:00:04,320", "to": "00:00:04,480" },
+          "offsets": { "from": 4320, "to": 4480 },
+          "id": 13,
+          "p": 0.865
+        },
+        {
+          "text": " [",
+          "timestamps": { "from": "00:00:04,480", "to": "00:00:04,640" },
+          "offsets": { "from": 4480, "to": 4640 },
+          "id": 508,
+          "p": 0.702
+        },
+        {
+          "text": "laughter",
+          "timestamps": { "from": "00:00:04,640", "to": "00:00:05,000" },
+          "offsets": { "from": 4640, "to": 5000 },
+          "id": 32135,
+          "p": 0.688
+        },
+        {
+          "text": "]",
+          "timestamps": { "from": "00:00:05,000", "to": "00:00:05,120" },
+          "offsets": { "from": 5000, "to": 5120 },
+          "id": 60,
+          "p": 0.751
+        }
+      ]
+    }
+  ]
+}
