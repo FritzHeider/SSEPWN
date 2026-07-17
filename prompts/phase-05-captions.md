@@ -59,7 +59,7 @@ Read `SPEC.md` first. Prerequisite: Phase 04 complete.
 ## Status
 
 - [x] clipCaptions slice/re-base + line grouping
-- [ ] Style model + 4 presets
+- [x] Style model + 4 presets
 - [ ] toAss with karaoke tags
 - [ ] burnIn ffmpeg function + integration test
 - [ ] Caption edit API (text/timing/style) with clip-local isolation
