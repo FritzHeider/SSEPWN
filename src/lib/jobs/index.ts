@@ -81,6 +81,8 @@ export interface JobQueue {
   complete(id: number): void;
   fail(id: number, error: unknown): Job | null;
   get(id: number): Job | null;
+  /** Every job for a project, oldest first. */
+  listByProject(projectId: number): Job[];
 }
 
 /**
@@ -203,5 +205,14 @@ export function createJobQueue(db: JobsDb, options: JobQueueOptions = {}): JobQu
     },
 
     get,
+
+    listByProject(projectId) {
+      const rows = db.all<JobRow>(sql`
+        SELECT * FROM ${jobs}
+        WHERE ${jobs.projectId} = ${projectId}
+        ORDER BY ${jobs.id} ASC
+      `);
+      return rows.map(rowToJob);
+    },
   };
 }

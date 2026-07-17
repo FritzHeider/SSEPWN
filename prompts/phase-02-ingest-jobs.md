@@ -62,7 +62,7 @@ Read `SPEC.md` first. Prerequisite: Phase 01 complete.
 - [x] Worker loop with handler registry + graceful shutdown
 - [x] Upload API with streaming + validation
 - [x] Ingest handler (probe, thumbnail, status transitions)
-- [ ] Status/read APIs
+- [x] Status/read APIs
 - [ ] Upload + project list UI
 - [ ] All listed tests written and green
 - [ ] All acceptance criteria verified in one iteration
