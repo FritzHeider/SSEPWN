@@ -29,6 +29,25 @@ export function fileInputAccept(): string {
 }
 
 /**
+ * The mime type to serve a stored video back as, from its filename.
+ *
+ * Inverts the allow-list rather than growing a second extension->mime table:
+ * this one already decided which three types exist, and a second copy would
+ * drift until a route served a type the upload boundary rejects. Uploads are
+ * stored under a generated name that keeps the original extension, so the stored
+ * path is enough to answer.
+ *
+ * Returns null for an extension no allowed type claims — the caller decides what
+ * that means, rather than being handed a plausible default that mislabels bytes.
+ */
+export function videoContentType(filename: string): string | null {
+  const ext = fileExtension(filename);
+  if (!ext) return null;
+  const found = Object.entries(ALLOWED_VIDEO_TYPES).find(([, exts]) => exts.includes(ext));
+  return found ? found[0] : null;
+}
+
+/**
  * Client-side pre-filter mirroring the server's rule: the mime type must be
  * known AND the extension must be one that type permits.
  *
