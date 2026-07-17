@@ -16,9 +16,7 @@ cli:
   prompt_mode: "arg"
 
 core:
-  scratchpad:
-    enabled: true
-    path: .ralph/agent/scratchpad.md
+  scratchpad: ".ralph/agent/scratchpad.md"
   guardrails:
     - "Read SPEC.md every iteration; it is the only source of truth for features and stack"
     - "npm run lint, npm run typecheck, and npm test must pass before every commit"
