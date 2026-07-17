@@ -70,7 +70,7 @@ feature — invest in making it deterministic and testable.
 - [x] selectClips top-N non-overlapping
 - [x] generate-clips job handler + pipeline wiring
 - [ ] Clip config stored per project + config API (GET/PUT clip-config)
-- [ ] Clips APIs (list/add/delete/regenerate)
+- [x] Clips APIs (list/add/delete/regenerate)
 - [ ] Clips UI panel with range preview
 - [ ] All listed tests green
 - [ ] All acceptance criteria verified in one iteration
