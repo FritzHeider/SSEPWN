@@ -63,9 +63,9 @@ importantly — the backpressure gates every later phase depends on.
 - [x] ffmpeg exec wrapper + probe with types
 - [x] make-fixtures.sh generating all five fixtures, idempotent
 - [x] ffmpeg probe integration tests green
-- [ ] README runnable end-to-end on a fresh machine
-- [ ] All acceptance criteria verified in one iteration
-- [ ] PHASE_COMPLETE
+- [x] README runnable end-to-end on a fresh machine
+- [x] All acceptance criteria verified in one iteration
+- [x] PHASE_COMPLETE
 
 ## Completion signal (ralph-orchestrator)
 

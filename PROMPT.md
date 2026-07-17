@@ -59,7 +59,7 @@ checklist.
 
 ## Status
 
-- [ ] Phase 01 — Scaffold, gates, fixtures (prompts/phase-01-scaffold.md)
+- [x] Phase 01 — Scaffold, gates, fixtures (prompts/phase-01-scaffold.md)
 - [ ] Phase 02 — Ingestion, jobs, worker (prompts/phase-02-ingest-jobs.md)
 - [ ] Phase 03 — Transcription (prompts/phase-03-transcription.md)
 - [ ] Phase 04 — Highlight detection + auto-clipping (prompts/phase-04-highlights.md)
