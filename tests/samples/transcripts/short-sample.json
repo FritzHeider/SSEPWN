@@ -1,0 +1,113 @@
+[
+  {
+    "text": "This is a short test clip.",
+    "start": 0.4,
+    "end": 2.1,
+    "words": [
+      {
+        "word": "This",
+        "start": 0.4,
+        "end": 0.708
+      },
+      {
+        "word": "is",
+        "start": 0.728,
+        "end": 0.912
+      },
+      {
+        "word": "a",
+        "start": 0.932,
+        "end": 1.055
+      },
+      {
+        "word": "short",
+        "start": 1.075,
+        "end": 1.445
+      },
+      {
+        "word": "test",
+        "start": 1.465,
+        "end": 1.772
+      },
+      {
+        "word": "clip.",
+        "start": 1.792,
+        "end": 2.1
+      }
+    ]
+  },
+  {
+    "text": "Here's the secret: it is only five seconds long.",
+    "start": 2.4,
+    "end": 4,
+    "words": [
+      {
+        "word": "Here's",
+        "start": 2.4,
+        "end": 2.614
+      },
+      {
+        "word": "the",
+        "start": 2.634,
+        "end": 2.757
+      },
+      {
+        "word": "secret:",
+        "start": 2.777,
+        "end": 2.991
+      },
+      {
+        "word": "it",
+        "start": 3.011,
+        "end": 3.103
+      },
+      {
+        "word": "is",
+        "start": 3.123,
+        "end": 3.215
+      },
+      {
+        "word": "only",
+        "start": 3.235,
+        "end": 3.389
+      },
+      {
+        "word": "five",
+        "start": 3.409,
+        "end": 3.562
+      },
+      {
+        "word": "seconds",
+        "start": 3.582,
+        "end": 3.827
+      },
+      {
+        "word": "long.",
+        "start": 3.847,
+        "end": 4
+      }
+    ]
+  },
+  {
+    "text": "That is all.",
+    "start": 4.2,
+    "end": 4.9,
+    "words": [
+      {
+        "word": "That",
+        "start": 4.2,
+        "end": 4.475
+      },
+      {
+        "word": "is",
+        "start": 4.495,
+        "end": 4.66
+      },
+      {
+        "word": "all.",
+        "start": 4.68,
+        "end": 4.9
+      }
+    ]
+  }
+]
