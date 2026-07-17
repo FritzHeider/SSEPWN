@@ -57,8 +57,8 @@ importantly — the backpressure gates every later phase depends on.
 
 ## Status
 
-- [ ] Next.js + TS strict + Tailwind + ESLint scaffold
-- [ ] npm scripts wired (dev/build/lint/typecheck/test/worker/fixtures/db:migrate)
+- [x] Next.js + TS strict + Tailwind + ESLint scaffold
+- [x] npm scripts wired (dev/build/lint/typecheck/test/worker/fixtures/db:migrate)
 - [ ] Drizzle schema + migration for all SPEC tables
 - [ ] ffmpeg exec wrapper + probe with types
 - [ ] make-fixtures.sh generating all five fixtures, idempotent
