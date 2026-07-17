@@ -9,6 +9,14 @@ const WORKER_PATH = fileURLToPath(new URL("./helpers/claim-worker.ts", import.me
 const WORKERS = 4;
 const JOB_COUNT = 300;
 
+/**
+ * Shared barrier slots, mirrored in helpers/claim-worker.ts. Slot 2
+ * (FIRST_CLAIMED) is used only between the workers themselves.
+ */
+const READY = 0;
+const GO = 1;
+const SLOTS = 3;
+
 let handle: TestDb | undefined;
 
 afterEach(() => {
@@ -16,10 +24,10 @@ afterEach(() => {
   handle = undefined;
 });
 
-function runClaimWorker(file: string, startAt: number): Promise<number[]> {
+function runClaimWorker(file: string, control: Int32Array): Promise<number[]> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(WORKER_PATH, {
-      workerData: { file, startAt },
+      workerData: { file, control, workers: WORKERS },
       // The worker imports the TypeScript job queue directly.
       execArgv: ["--import", "tsx"],
     });
@@ -52,11 +60,18 @@ it(
       (_, i) => queue.enqueue("ingest", projectId, { i }).id,
     );
 
-    // Give every worker time to boot, then release them all at once.
-    const startAt = Date.now() + 2_000;
-    const results = await Promise.all(
-      Array.from({ length: WORKERS }, () => runClaimWorker(handle!.file, startAt)),
-    );
+    // Release every worker at the same instant, but only once all of them have
+    // actually booted — see helpers/claim-worker.ts.
+    const control = new Int32Array(new SharedArrayBuffer(SLOTS * Int32Array.BYTES_PER_ELEMENT));
+    const pending = Array.from({ length: WORKERS }, () => runClaimWorker(handle!.file, control));
+
+    while (Atomics.load(control, READY) < WORKERS) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    Atomics.store(control, GO, 1);
+    Atomics.notify(control, GO);
+
+    const results = await Promise.all(pending);
 
     const allClaims = results.flat();
     const unique = new Set(allClaims);
@@ -70,7 +85,10 @@ it(
     const attempts = enqueuedIds.map((id) => queue.get(id)?.attempts);
     expect(attempts.every((a) => a === 1)).toBe(true);
 
-    // Contention actually happened: no single worker drained the whole queue.
-    expect(results.filter((r) => r.length > 0).length).toBeGreaterThan(1);
+    // Contention actually happened, so the invariants above were really tested:
+    // every worker raced for its first job at the same instant and won one, which
+    // the barrier in claim-worker.ts makes structural rather than a matter of
+    // scheduling luck (a descheduled worker used to claim nothing at all).
+    expect(results.filter((r) => r.length > 0).length).toBe(WORKERS);
   },
 );
