@@ -1,10 +1,10 @@
-import { desc } from "drizzle-orm";
 import { unlink } from "node:fs/promises";
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { createJobQueue } from "@/lib/jobs";
+import { listProjects } from "@/lib/projects/queries";
 import { receiveUpload, UploadError } from "@/lib/upload/receive";
 
 // better-sqlite3 and the streaming parser both need Node APIs.
@@ -14,17 +14,12 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/projects — every project, newest first.
  *
- * The tiebreak on `id` is load-bearing, not decoration: `created_at` is
- * unixepoch SECONDS, so projects uploaded within the same second collide and
- * `ORDER BY created_at DESC` alone leaves their order up to SQLite. The list UI
- * polls, so an unstable sort would visibly shuffle rows between refreshes. `id`
- * is a monotonic autoincrement, which makes it the tiebreak that matches
- * "newest first".
+ * The ordering (and why its `id` tiebreak matters) lives in `listProjects`,
+ * which the `/` page server-renders from, so the first paint and every poll
+ * cannot disagree.
  */
 export async function GET() {
-  const rows = db.select().from(projects).orderBy(desc(projects.createdAt), desc(projects.id)).all();
-
-  return NextResponse.json({ projects: rows });
+  return NextResponse.json({ projects: listProjects() });
 }
 
 /**

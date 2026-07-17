@@ -1,4 +1,6 @@
 import busboy from "busboy";
+
+import { ALLOWED_VIDEO_TYPES, allowedExtensions } from "./allowed";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, unlink } from "node:fs/promises";
@@ -10,16 +12,10 @@ import { pipeline } from "node:stream/promises";
 /** SPEC.md § Feature checklist 1 — uploads are capped at 2 GB. */
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
-/**
- * Accepted video types (SPEC.md § Feature checklist 1: mp4/mov/webm). The
- * declared mime type and the filename extension must agree — a client that
- * sends either one alone is not trusted.
- */
-export const ALLOWED_VIDEO_TYPES: Readonly<Record<string, readonly string[]>> = {
-  "video/mp4": [".mp4"],
-  "video/quicktime": [".mov"],
-  "video/webm": [".webm"],
-};
+// The accepted-type table lives in a dependency-free module so the browser
+// dropzone can pre-filter against the same rules this file enforces. Re-exported
+// to keep it importable from here, where the enforcement actually happens.
+export { ALLOWED_VIDEO_TYPES };
 
 export type UploadErrorCode = "not_multipart" | "no_file" | "unsupported_type" | "too_large";
 
@@ -63,9 +59,7 @@ export function maxUploadBytes(): number {
 }
 
 function describeAllowed(): string {
-  return Object.values(ALLOWED_VIDEO_TYPES)
-    .flat()
-    .join(", ");
+  return allowedExtensions().join(", ");
 }
 
 /**
