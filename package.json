@@ -2,6 +2,10 @@
   "name": "sseclone",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "postcss": "^8.5.10",
+    "esbuild": "^0.25.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -12,7 +16,7 @@
     "test:watch": "vitest",
     "worker": "tsx src/worker/index.ts",
     "fixtures": "bash scripts/make-fixtures.sh",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "mkdir -p data && drizzle-kit migrate"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
@@ -28,6 +32,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^4.1.10",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
