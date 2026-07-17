@@ -36,6 +36,18 @@ export const jobs = sqliteTable("jobs", {
   progress: integer("progress").notNull().default(0), // 0–100
   error: text("error"),
   payload: text("payload"), // JSON
+  /** Incremented by each claim, so a running job's attempts includes itself. */
+  attempts: integer("attempts").notNull().default(0),
+  /** Initial try + 2 retries. Exceeding this marks the job `failed`. */
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  /**
+   * Earliest time this job may be claimed; retry backoff pushes it forward.
+   * NOTE: epoch MILLISECONDS, unlike the epoch-second timestamps elsewhere in
+   * this schema — backoff needs sub-second resolution.
+   */
+  runAt: integer("run_at")
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
   createdAt: integer("created_at")
     .notNull()
     .default(sql`(unixepoch())`),

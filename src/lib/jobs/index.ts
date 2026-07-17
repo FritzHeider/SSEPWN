@@ -1,0 +1,207 @@
+import { eq, sql } from "drizzle-orm";
+import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+
+import * as schema from "../db/schema";
+import { jobs } from "../db/schema";
+
+export type JobsDb = BetterSQLite3Database<typeof schema>;
+
+export type JobStatus = "queued" | "running" | "done" | "failed";
+
+export interface Job {
+  id: number;
+  projectId: number;
+  type: string;
+  status: JobStatus;
+  /** 0–100. */
+  progress: number;
+  error: string | null;
+  /** Parsed from the payload JSON column; null when no payload was given. */
+  payload: unknown;
+  /** Includes the current attempt while the job is running. */
+  attempts: number;
+  maxAttempts: number;
+  /** Epoch milliseconds — earliest time this job may be claimed. */
+  runAt: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface JobQueueOptions {
+  /** Epoch milliseconds. Injectable so retry backoff is testable without sleeps. */
+  now?: () => number;
+  /** Delay before retrying a job that has already failed `attempt` times. */
+  backoffMs?: (attempt: number) => number;
+  /** Total attempts allowed per job (initial try + retries). */
+  maxAttempts?: number;
+}
+
+/** Exponential: 1s after the first failure, 2s after the second, capped at 30s. */
+export function defaultBackoffMs(attempt: number): number {
+  return Math.min(1000 * 2 ** Math.max(0, attempt - 1), 30_000);
+}
+
+/** Shape returned by the raw claim statement (SQLite column names). */
+interface JobRow {
+  id: number;
+  project_id: number;
+  type: string;
+  status: string;
+  progress: number;
+  error: string | null;
+  payload: string | null;
+  attempts: number;
+  max_attempts: number;
+  run_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
+function rowToJob(row: JobRow): Job {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    type: row.type,
+    status: row.status as JobStatus,
+    progress: row.progress,
+    error: row.error,
+    payload: row.payload === null ? null : (JSON.parse(row.payload) as unknown),
+    attempts: row.attempts,
+    maxAttempts: row.max_attempts,
+    runAt: row.run_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export interface JobQueue {
+  enqueue(type: string, projectId: number, payload?: unknown): Job;
+  claimNext(): Job | null;
+  updateProgress(id: number, progress: number): void;
+  complete(id: number): void;
+  fail(id: number, error: unknown): Job | null;
+  get(id: number): Job | null;
+}
+
+/**
+ * SQLite-backed job queue (SPEC.md § Tech stack — no Redis, no external
+ * services). The drizzle instance is passed in rather than imported so that
+ * importing this module has no side effects: `src/lib/db/index.ts` opens the
+ * database file at import time.
+ */
+export function createJobQueue(db: JobsDb, options: JobQueueOptions = {}): JobQueue {
+  const now = options.now ?? (() => Date.now());
+  const backoffMs = options.backoffMs ?? defaultBackoffMs;
+  const maxAttempts = options.maxAttempts ?? 3;
+
+  function get(id: number): Job | null {
+    const rows = db.all<JobRow>(sql`SELECT * FROM ${jobs} WHERE ${jobs.id} = ${id}`);
+    return rows.length > 0 ? rowToJob(rows[0]) : null;
+  }
+
+  return {
+    enqueue(type, projectId, payload) {
+      if (type.trim() === "") {
+        throw new Error("Job type must be a non-empty string");
+      }
+
+      const [inserted] = db
+        .insert(jobs)
+        .values({
+          projectId,
+          type,
+          status: "queued",
+          payload: payload === undefined ? null : JSON.stringify(payload),
+          maxAttempts,
+          runAt: now(),
+        })
+        .returning({ id: jobs.id })
+        .all();
+
+      const job = get(inserted.id);
+      if (!job) {
+        throw new Error(`Enqueued job ${inserted.id} disappeared`);
+      }
+      return job;
+    },
+
+    /**
+     * Atomically claim the oldest due job. This is deliberately ONE statement:
+     * SQLite serialises it under the write lock, so two workers in separate
+     * processes can never claim the same job. A read-then-write claim would
+     * pass an in-process test (better-sqlite3 is synchronous) yet still race
+     * between real worker processes.
+     */
+    claimNext() {
+      const rows = db.all<JobRow>(sql`
+        UPDATE ${jobs}
+        SET status = 'running',
+            attempts = attempts + 1,
+            updated_at = unixepoch()
+        WHERE id = (
+          SELECT id FROM ${jobs}
+          WHERE status = 'queued' AND run_at <= ${now()}
+          ORDER BY run_at ASC, id ASC
+          LIMIT 1
+        )
+        RETURNING *
+      `);
+      return rows.length > 0 ? rowToJob(rows[0]) : null;
+    },
+
+    updateProgress(id, progress) {
+      const clamped = Math.max(0, Math.min(100, Math.round(progress)));
+      db.update(jobs)
+        .set({ progress: clamped, updatedAt: sql`(unixepoch())` })
+        .where(eq(jobs.id, id))
+        .run();
+    },
+
+    complete(id) {
+      db.update(jobs)
+        .set({
+          status: "done",
+          progress: 100,
+          error: null,
+          updatedAt: sql`(unixepoch())`,
+        })
+        .where(eq(jobs.id, id))
+        .run();
+    },
+
+    /**
+     * Record a failed attempt. Requeues with backoff while attempts remain,
+     * otherwise marks the job `failed`. Returns the job's new state, or null
+     * if no such job exists.
+     */
+    fail(id, error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      return db.transaction((tx): Job | null => {
+        const rows = tx.all<JobRow>(sql`SELECT * FROM ${jobs} WHERE ${jobs.id} = ${id}`);
+        if (rows.length === 0) return null;
+        const job = rowToJob(rows[0]);
+
+        const exhausted = job.attempts >= job.maxAttempts;
+        tx.update(jobs)
+          .set(
+            exhausted
+              ? { status: "failed", error: message, updatedAt: sql`(unixepoch())` }
+              : {
+                  status: "queued",
+                  error: message,
+                  runAt: now() + backoffMs(job.attempts),
+                  updatedAt: sql`(unixepoch())`,
+                },
+          )
+          .where(eq(jobs.id, id))
+          .run();
+
+        const updated = tx.all<JobRow>(sql`SELECT * FROM ${jobs} WHERE ${jobs.id} = ${id}`);
+        return rowToJob(updated[0]);
+      });
+    },
+
+    get,
+  };
+}

@@ -58,7 +58,7 @@ Read `SPEC.md` first. Prerequisite: Phase 01 complete.
 
 ## Status
 
-- [ ] Job queue lib with atomic claim + retry/backoff
+- [x] Job queue lib with atomic claim + retry/backoff
 - [ ] Worker loop with handler registry + graceful shutdown
 - [ ] Upload API with streaming + validation
 - [ ] Ingest handler (probe, thumbnail, status transitions)
