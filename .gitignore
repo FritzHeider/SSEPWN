@@ -50,3 +50,9 @@ npm-debug.log*
 # Temp render intermediates
 tmp/
 *.tmp
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# claude-flow local state
+.claude-flow/
