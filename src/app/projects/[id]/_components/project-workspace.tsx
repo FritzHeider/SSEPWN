@@ -2,6 +2,9 @@
 
 import { useCallback, useRef, useState } from "react";
 
+import { ClipsPanel } from "./clips-panel";
+import type { ProjectClip } from "@/lib/projects/clips";
+import { shouldPausePreview } from "@/lib/projects/clips-panel";
 import type { ProjectTranscript } from "@/lib/projects/transcript";
 import {
   NO_ACTIVE_SEGMENT,
@@ -12,20 +15,32 @@ import {
 } from "@/lib/transcribe/panel";
 
 /**
- * The source video plus its transcript, with click-to-seek.
+ * The project page's interactive half: one <video> shared by the transcript and
+ * the clips panel.
  *
- * Thin on purpose (DEC-005): every decision it makes — which sentence is
- * active, how a timestamp reads, what to say when there are no sentences — comes
- * from `lib/transcribe/panel.ts`, where node-env vitest can test it honestly.
+ * The video lives here, not inside either panel, because both need it and the
+ * spec's clip preview is "in the player" — the same element the transcript seeks
+ * (DEC-005 keeps the decisions in pure libs; this component only wires them to
+ * the element). A transcript click seeks without playing ("show me this
+ * moment"); a clip click seeks AND plays, then pauses itself at the out-point
+ * via the element's own `timeupdate` clock, so the pause cannot drift from the
+ * frame on screen.
  */
-export function TranscriptPanel({
+export function ProjectWorkspace({
   projectId,
+  duration,
   transcript,
+  initialClips,
 }: {
   projectId: number;
+  duration: number | null;
   transcript: ProjectTranscript;
+  initialClips: ProjectClip[];
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Out-point a running preview should stop at, or null when free-playing. A ref
+  // so the timeupdate handler reads the latest target without re-binding.
+  const previewOut = useRef<number | null>(null);
   const [activeIndex, setActiveIndex] = useState(NO_ACTIVE_SEGMENT);
   const { segments } = transcript;
   const emptyMessage = emptyTranscriptMessage(transcript);
@@ -33,23 +48,36 @@ export function TranscriptPanel({
   const seekTo = useCallback((seconds: number) => {
     const video = videoRef.current;
     if (!video) return;
-    // Assigning currentTime is what triggers the Range request the video route
-    // exists to answer. play() is deliberately not called: a click on a sentence
-    // asks "show me this moment", not "start playing".
+    // A transcript click is "show me this moment", not "play": clear any preview
+    // target and set the time, which is what triggers the video route's Range
+    // request. The element stays paused if it already was.
+    previewOut.current = null;
     video.currentTime = seconds;
   }, []);
 
-  // Driven by the element's own clock rather than a timer, so the highlight
-  // cannot drift away from the frame actually on screen — including while the
-  // user scrubs the native controls, which no timer of ours would hear about.
+  const previewRange = useCallback((inPoint: number, outPoint: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    previewOut.current = outPoint;
+    video.currentTime = inPoint;
+    void video.play();
+  }, []);
+
+  const getCurrentTime = useCallback(() => videoRef.current?.currentTime ?? 0, []);
+
   const onTimeUpdate = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+    const target = previewOut.current;
+    if (target !== null && shouldPausePreview(video.currentTime, target)) {
+      video.pause();
+      previewOut.current = null;
+    }
     setActiveIndex(activeSegmentIndex(segments, video.currentTime));
   }, [segments]);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       {/* No <track> yet: captions are Phase 05. Until then the transcript below
           is this video's accessible text. */}
       <video
@@ -59,6 +87,14 @@ export function TranscriptPanel({
         preload="metadata"
         onTimeUpdate={onTimeUpdate}
         className="w-full rounded-lg bg-black"
+      />
+
+      <ClipsPanel
+        projectId={projectId}
+        duration={duration}
+        initialClips={initialClips}
+        onPreview={previewRange}
+        getCurrentTime={getCurrentTime}
       />
 
       <section className="flex flex-col gap-3">

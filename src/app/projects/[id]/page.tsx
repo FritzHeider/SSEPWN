@@ -2,10 +2,11 @@ import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { TranscriptPanel } from "./_components/transcript-panel";
+import { ProjectWorkspace } from "./_components/project-workspace";
 import { parseId } from "@/lib/api/params";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
+import { listClips } from "@/lib/projects/clips";
 import { readTranscript } from "@/lib/projects/transcript";
 import { formatDuration, formatResolution, statusBadge, EMPTY } from "@/lib/projects/view";
 
@@ -32,9 +33,10 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const project = db.select().from(projects).where(eq(projects.id, id)).get();
   if (!project) notFound();
 
-  // Non-null: readTranscript returns null only when the project is absent, and
-  // the select above already proved it is not.
+  // Non-null: readTranscript and listClips return null only when the project is
+  // absent, and the select above already proved it is not.
   const transcript = readTranscript(db, id)!;
+  const clips = listClips(db, id)!;
 
   const badge = statusBadge(project);
   const duration = formatDuration(project.duration);
@@ -62,7 +64,12 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           ) : null}
         </header>
 
-        <TranscriptPanel projectId={id} transcript={transcript} />
+        <ProjectWorkspace
+          projectId={id}
+          duration={project.duration}
+          transcript={transcript}
+          initialClips={clips}
+        />
       </main>
     </div>
   );

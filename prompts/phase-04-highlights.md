@@ -69,9 +69,9 @@ feature — invest in making it deterministic and testable.
 - [x] snapBoundaries (sentence/scene snapping, never mid-word)
 - [x] selectClips top-N non-overlapping
 - [x] generate-clips job handler + pipeline wiring
-- [ ] Clip config stored per project + config API (GET/PUT clip-config)
+- [x] Clip config stored per project + config API (GET/PUT clip-config)
 - [x] Clips APIs (list/add/delete/regenerate)
-- [ ] Clips UI panel with range preview
+- [x] Clips UI panel with range preview
 - [ ] All listed tests green
 - [ ] All acceptance criteria verified in one iteration
 - [ ] PHASE_COMPLETE
