@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { clips, jobs, projects } from "../src/lib/db/schema";
+import { clipEdits, clips, jobs, projects } from "../src/lib/db/schema";
 import { createTestDb, type TestDb } from "./helpers/db";
 
 type ParamHandler = (
@@ -100,6 +100,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   testDb.db.delete(jobs).run();
+  testDb.db.delete(clipEdits).run();
   testDb.db.delete(clips).run();
   testDb.db.delete(projects).run();
 });
@@ -233,6 +234,21 @@ describe("DELETE /api/clips/:id", () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { deleted: number }).deleted).toBe(clipId);
     expect(testDb.db.select().from(clips).where(eq(clips.id, clipId)).all()).toHaveLength(0);
+  });
+
+  it("deletes a clip that has caption edits, cascading the clip_edits rows", async () => {
+    const id = seedProject();
+    const clipId = seedClip(id, { inPoint: 0, outPoint: 30, score: 0.5 });
+    // The phase-05 caption editor writes a clip_edits row keyed to the clip.
+    // With FK enforcement on, deleting the clip used to 500 on this row.
+    testDb.db.insert(clipEdits).values({ clipId, state: JSON.stringify({ captions: {} }) }).run();
+
+    const res = await deleteClip(String(clipId));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { deleted: number }).deleted).toBe(clipId);
+    expect(testDb.db.select().from(clips).where(eq(clips.id, clipId)).all()).toHaveLength(0);
+    // The orphan-able child rows are gone too.
+    expect(testDb.db.select().from(clipEdits).where(eq(clipEdits.clipId, clipId)).all()).toHaveLength(0);
   });
 
   it("returns 404 for a clip that does not exist", async () => {

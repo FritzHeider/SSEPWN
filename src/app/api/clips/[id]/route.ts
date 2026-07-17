@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { parseId } from "@/lib/api/params";
 import { db } from "@/lib/db";
-import { clips } from "@/lib/db/schema";
+import { clipEdits, clips } from "@/lib/db/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +24,14 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     );
   }
 
-  const deleted = db.delete(clips).where(eq(clips.id, id)).returning({ id: clips.id }).all();
+  // A clip owns its caption/timeline edits (clip_edits.clip_id → clips.id), and
+  // foreign keys are enforced (db/index.ts). Deleting the clip while an edit row
+  // still points at it throws a FOREIGN KEY constraint error, so drop the child
+  // rows first, atomically, so a mid-delete failure never orphans either side.
+  const deleted = db.transaction((tx) => {
+    tx.delete(clipEdits).where(eq(clipEdits.clipId, id)).run();
+    return tx.delete(clips).where(eq(clips.id, id)).returning({ id: clips.id }).all();
+  });
   if (deleted.length === 0) {
     return NextResponse.json({ error: `No clip with id ${id}`, code: "not_found" }, { status: 404 });
   }
