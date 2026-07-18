@@ -26,6 +26,15 @@ describe("sampleFrames — validation", () => {
       /positive integer/,
     );
   });
+
+  it("rejects a negative startSec or non-positive durationSec", async () => {
+    await expect(sampleFrames(SHORT_SAMPLE, 1, tmpdir(), { startSec: -1 })).rejects.toThrow(
+      /non-negative/,
+    );
+    await expect(sampleFrames(SHORT_SAMPLE, 1, tmpdir(), { durationSec: 0 })).rejects.toThrow(
+      /positive number/,
+    );
+  });
 });
 
 describe("sampleFrames — real ffmpeg extraction", () => {
@@ -74,6 +83,17 @@ describe("sampleFrames — real ffmpeg extraction", () => {
     const probed = await probe(frames[0].path);
     expect(probed.width).toBe(320);
     expect(probed.height).toBe(180);
+  });
+
+  it("samples only a clip window, with window-relative timestamps", async () => {
+    const dest = path.join(workDir, "window");
+    // Clip [1, 4) of the 5s source: 3s window at 1 fps ⇒ 3 frames.
+    const frames = await sampleFrames(SHORT_SAMPLE, 1, dest, { startSec: 1, durationSec: 3 });
+
+    // t is relative to the window start (0,1,2), not the source (1,2,3) — the
+    // clip-relative timestamps the smart-crop job hands planCrop unchanged.
+    expect(frames.map((f) => f.t)).toEqual([0, 1, 2]);
+    expect(frames.every((f) => existsSync(f.path))).toBe(true);
   });
 
   it("writes frames only to the given directory, leaving siblings untouched", async () => {

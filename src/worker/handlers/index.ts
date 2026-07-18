@@ -1,6 +1,7 @@
 import type { Job, JobsDb } from "../../lib/jobs";
 import { createGenerateClipsHandler } from "./generate-clips";
 import { createIngestHandler } from "./ingest";
+import { createSmartCropHandler } from "./smart-crop";
 import { createTranscribeHandler } from "./transcribe";
 
 /** Everything a handler is allowed to touch. */
@@ -22,11 +23,18 @@ export type HandlerRegistry = Record<string, JobHandler>;
 
 /**
  * Job type → handler. Later phases extend the pipeline by adding entries here
- * (ingest in Phase 02, transcribe in Phase 03, generate-clips in Phase 04, …);
- * the worker loop itself does not change.
+ * (ingest in Phase 02, transcribe in Phase 03, generate-clips in Phase 04,
+ * smart-crop in Phase 06, …); the worker loop itself does not change.
+ *
+ * `smart-crop` is registered without a detector: the real `HumanFaceDetector`
+ * (phase-06, still pending) will be injected here once it lands, at which point
+ * the job runs end-to-end. Until then an enqueued smart-crop job fails loudly
+ * with an actionable "no SubjectDetector configured" error rather than silently
+ * producing a static center crop.
  */
 export const handlers: HandlerRegistry = {
   ingest: createIngestHandler(),
   transcribe: createTranscribeHandler(),
   "generate-clips": createGenerateClipsHandler(),
+  "smart-crop": createSmartCropHandler(),
 };

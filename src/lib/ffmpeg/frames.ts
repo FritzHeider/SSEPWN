@@ -10,7 +10,11 @@ import { runFfmpeg } from "./exec";
  * build the `FrameSample[]` that `planCrop` consumes.
  */
 export interface SampledFrame {
-  /** Seconds from the start of the video, `index * everyNSec`. */
+  /**
+   * Seconds from the start of the sample window, `index * everyNSec`. Without
+   * `startSec` this is time from the start of the video; with it, time from the
+   * seek point — so the smart-crop job gets clip-relative timestamps directly.
+   */
   t: number;
   /** Absolute path to the extracted PNG frame. */
   path: string;
@@ -24,6 +28,20 @@ export interface SampleFramesOptions {
    * detection cheaper on a big source.
    */
   width?: number;
+  /**
+   * Seek this many seconds into the source before sampling (ffmpeg input `-ss`).
+   * The smart-crop job samples only a clip's `[in, out]` range, not the whole
+   * source, so it passes the clip's in-point here. With this set the returned
+   * `t` values stay `index * everyNSec` — i.e. relative to the sample window's
+   * start, so the smart-crop job gets clip-relative timestamps for free.
+   */
+  startSec?: number;
+  /**
+   * Sample at most this many seconds from `startSec` (ffmpeg `-t`). Omit to
+   * sample to the end of the source. The job passes the clip's duration so no
+   * frames past the clip's out-point are extracted.
+   */
+  durationSec?: number;
 }
 
 /** `frame-00001.png`, `frame-00002.png`, … — image2's default 1-based numbering. */
@@ -70,12 +88,33 @@ export async function sampleFrames(
     filter += `,scale=${options.width}:-2`;
   }
 
+  // Optional clip window: `-ss` (input seek) before `-i`, `-t` (duration) after.
+  // Input-side seeking is fast and the fps filter counts from the seek point, so
+  // frame `i` is still at `startSec + i*everyNSec` in the source and `i*everyNSec`
+  // relative to the window — which is what the returned `t` reports.
+  const seek: string[] = [];
+  if (options.startSec !== undefined) {
+    if (!Number.isFinite(options.startSec) || options.startSec < 0) {
+      throw new Error(`sampleFrames: startSec must be a non-negative number, got ${options.startSec}`);
+    }
+    seek.push("-ss", String(options.startSec));
+  }
+  const duration: string[] = [];
+  if (options.durationSec !== undefined) {
+    if (!Number.isFinite(options.durationSec) || options.durationSec <= 0) {
+      throw new Error(`sampleFrames: durationSec must be a positive number, got ${options.durationSec}`);
+    }
+    duration.push("-t", String(options.durationSec));
+  }
+
   await runFfmpeg([
     "-hide_banner",
     "-loglevel",
     "error",
+    ...seek,
     "-i",
     videoPath,
+    ...duration,
     "-vf",
     filter,
     "-y",
