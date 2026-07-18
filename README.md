@@ -94,6 +94,54 @@ It asserts the binary spawns, accepts our arg array, and emits JSON the parser
 still reads — not any particular words, since the generated fixtures are sine
 tones with no speech in them.
 
+## Smart crop
+
+Reframing to 9:16 / 1:1 / 16:9 tracks the subject through a `SubjectDetector`
+interface (`src/lib/crop/`), so the test suite never needs TF.js or any model —
+`npm test` passes with `FakeDetector`, which replays scripted boxes. The pure
+`planCrop`/`cropFilter` do all the reframe math and are unit-tested with no
+ffmpeg and no models.
+
+The real detector, `HumanFaceDetector`, uses [@vladmandic/human] face detection
+(TF.js, **CPU** — no GPU) with a center-weighted fallback when no face is found.
+Like whisper, it is an **opt-in external dependency**: not in `package.json`, and
+its models are gitignored. Only needed to run smart crop for real (`npm run
+worker`) or the opt-in smoke test.
+
+| Env var | Default | What it is |
+|---|---|---|
+| `HUMAN_MODELS_PATH` | `models/human` | Directory the face-detector models live in |
+| `HUMAN_BACKEND` | `tensorflow` | TF.js backend (the `@tensorflow/tfjs-node` CPU backend) |
+
+```bash
+# 1. download the face models once (~2 MB; only the detector — mesh/iris/emotion
+#    are disabled, so nothing else is fetched). Gitignored under models/human/.
+CROP_MODELS=1 npm run fixtures
+
+# 2. install the opt-in packages (both pulled in via a runtime dynamic import,
+#    so the default install / build / test never touch them)
+npm install @vladmandic/human @tensorflow/tfjs-node
+```
+
+A missing package, missing models, or a backend with no image decoder fails
+loudly with a message naming exactly what to install — it never silently returns
+"no subject", which `planCrop` would turn into a static center crop with no hint
+anything was wrong.
+
+Once set up you can smoke-test the real detector. It is skipped by default —
+`npm test` never loads TF.js — and opt-in rather than auto-detected, so "the
+detector regressed" can never be mistaken for "the detector is absent":
+
+```bash
+CROP_SMOKE=1 npm test   # plus HUMAN_MODELS_PATH if not the default
+```
+
+It asserts the backend loads, decodes a sampled frame, and returns well-formed
+normalised boxes — not any particular faces, since `short-sample.mp4` is an
+ffmpeg test pattern with no faces in it.
+
+[@vladmandic/human]: https://github.com/vladmandic/human
+
 ## Repo layout
 
 - `src/lib/ffmpeg/` — all FFmpeg/ffprobe invocations (execa arg arrays only)

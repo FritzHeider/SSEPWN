@@ -79,3 +79,31 @@ if [ -f fixtures/not-a-video.txt ]; then skip not-a-video.txt; else
 fi
 
 echo "fixtures ready in fixtures/"
+
+# --- Optional: @vladmandic/human face-detection models (smart crop) ----------
+# OPT-IN via CROP_MODELS=1 — off by default so a fresh `npm run fixtures` stays
+# fast and network-free (the default test suite uses FakeDetector and needs no
+# models). Fetches ONLY the face detector Human's default config uses (mesh/iris/
+# emotion are disabled in src/lib/crop/human.ts), so this is small: ~2 MB total.
+# Models land in models/human/ (gitignored). Enable the real detector with:
+#   CROP_MODELS=1 npm run fixtures      # download models once
+#   npm install @vladmandic/human @tensorflow/tfjs-node
+#   CROP_SMOKE=1 npm test               # opt-in smoke test
+if [ "${CROP_MODELS:-}" = "1" ]; then
+  command -v curl >/dev/null 2>&1 || {
+    echo "error: curl not found on PATH (needed for CROP_MODELS=1)" >&2
+    exit 1
+  }
+  human_base="https://raw.githubusercontent.com/vladmandic/human-models/main/models"
+  mkdir -p models/human
+  for f in blazeface.json blazeface.bin; do
+    if [ -f "models/human/$f" ]; then
+      echo "skip: models/human/$f already exists"
+    else
+      echo "downloading models/human/$f ..."
+      curl -fsSL "$human_base/$f" -o "models/human/$f"
+      echo "made: models/human/$f"
+    fi
+  done
+  echo "human face models ready in models/human/ (~2 MB)"
+fi

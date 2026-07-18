@@ -1,3 +1,4 @@
+import { HumanFaceDetector } from "../../lib/crop/human";
 import type { Job, JobsDb } from "../../lib/jobs";
 import { createGenerateClipsHandler } from "./generate-clips";
 import { createIngestHandler } from "./ingest";
@@ -26,15 +27,16 @@ export type HandlerRegistry = Record<string, JobHandler>;
  * (ingest in Phase 02, transcribe in Phase 03, generate-clips in Phase 04,
  * smart-crop in Phase 06, …); the worker loop itself does not change.
  *
- * `smart-crop` is registered without a detector: the real `HumanFaceDetector`
- * (phase-06, still pending) will be injected here once it lands, at which point
- * the job runs end-to-end. Until then an enqueued smart-crop job fails loudly
- * with an actionable "no SubjectDetector configured" error rather than silently
- * producing a static center crop.
+ * `smart-crop` runs with the real `HumanFaceDetector` (phase-06). The detector
+ * is constructed here but loads nothing until its first `detect` call, so wiring
+ * it in pulls in no TF.js and touches no disk; an enqueued job that reaches a
+ * machine without the opt-in `@vladmandic/human` backend or its models fails
+ * loudly with an actionable install/setup message (README § Smart crop) rather
+ * than silently producing a static center crop.
  */
 export const handlers: HandlerRegistry = {
   ingest: createIngestHandler(),
   transcribe: createTranscribeHandler(),
   "generate-clips": createGenerateClipsHandler(),
-  "smart-crop": createSmartCropHandler(),
+  "smart-crop": createSmartCropHandler({ detector: new HumanFaceDetector() }),
 };

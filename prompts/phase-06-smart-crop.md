@@ -64,7 +64,7 @@ Read `SPEC.md` first. Prerequisite: Phase 05 complete.
 ## Status
 
 - [x] SubjectDetector interface + types (Box/AspectRatio) + FakeDetector
-- [ ] HumanFaceDetector impl (@vladmandic/human, models via make-fixtures.sh)
+- [x] HumanFaceDetector impl (@vladmandic/human, models via make-fixtures.sh)
 - [x] Frame sampling
 - [x] planCrop with smoothing/dead-zone/fallback (pure)
 - [x] cropFilter expression builder + one real ffmpeg integration test
