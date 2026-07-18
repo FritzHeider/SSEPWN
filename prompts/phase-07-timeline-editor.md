@@ -57,7 +57,7 @@ UI-heavy; keep the timeline STATE pure and tested, the React layer thin.
 ## Status
 
 - [x] Pure timeline doc model + all ops with invariants
-- [ ] Caption re-mapping through edits
+- [x] Caption re-mapping through edits
 - [ ] Timeline strip UI (tracks, trim, split, reorder, zoom, snapping)
 - [ ] Edited-sequence preview playback
 - [ ] Undo/redo
