@@ -64,9 +64,9 @@ Read `SPEC.md` first. Prerequisite: Phase 04 complete.
 - [x] burnIn ffmpeg function + integration test
 - [x] Caption edit API (text/timing/style) with clip-local isolation
 - [x] Clip editor caption UI with live styled preview
-- [ ] All listed tests green
-- [ ] All acceptance criteria verified in one iteration
-- [ ] PHASE_COMPLETE
+- [x] All listed tests green
+- [x] All acceptance criteria verified in one iteration
+- [x] PHASE_COMPLETE
 
 ## Completion signal (ralph-orchestrator)
 
