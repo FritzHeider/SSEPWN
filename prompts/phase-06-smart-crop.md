@@ -69,7 +69,7 @@ Read `SPEC.md` first. Prerequisite: Phase 05 complete.
 - [x] planCrop with smoothing/dead-zone/fallback (pure)
 - [x] cropFilter expression builder + one real ffmpeg integration test
 - [x] smart-crop job + storage in clip_edits
-- [ ] Crop APIs (auto enqueue, manual override, locked keyframes)
+- [x] Crop APIs (auto enqueue, manual override, locked keyframes)
 - [ ] Editor UI: AR switcher + draggable crop overlay
 - [ ] All listed tests green without TF models
 - [ ] All acceptance criteria verified in one iteration
