@@ -70,7 +70,7 @@ Read `SPEC.md` first. Prerequisite: Phase 05 complete.
 - [x] cropFilter expression builder + one real ffmpeg integration test
 - [x] smart-crop job + storage in clip_edits
 - [x] Crop APIs (auto enqueue, manual override, locked keyframes)
-- [ ] Editor UI: AR switcher + draggable crop overlay
+- [x] Editor UI: AR switcher + draggable crop overlay
 - [ ] All listed tests green without TF models
 - [ ] All acceptance criteria verified in one iteration
 - [ ] PHASE_COMPLETE

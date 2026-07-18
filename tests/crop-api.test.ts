@@ -13,6 +13,7 @@ type ParamHandler = (
   ctx: { params: Promise<{ id: string }> },
 ) => Promise<Response>;
 
+let cropGET: ParamHandler;
 let cropPOST: ParamHandler;
 let cropPATCH: ParamHandler;
 let testDb: TestDb;
@@ -29,6 +30,10 @@ function post(id: string, body: unknown, raw = false): Promise<Response> {
     }),
     ctx(id),
   );
+}
+
+function get(id: string): Promise<Response> {
+  return cropGET(new Request(`http://localhost/api/clips/${id}/crop`), ctx(id));
 }
 
 function patch(id: string, body: unknown, raw = false): Promise<Response> {
@@ -79,9 +84,9 @@ const KF = { t: 1, x: 300, y: 0, w: 405, h: 720 };
 beforeAll(async () => {
   testDb = createTestDb();
   process.env.SSECLONE_DB_PATH = testDb.file;
-  ({ POST: cropPOST, PATCH: cropPATCH } = (await import(
+  ({ GET: cropGET, POST: cropPOST, PATCH: cropPATCH } = (await import(
     "../src/app/api/clips/[id]/crop/route"
-  )) as unknown as { POST: ParamHandler; PATCH: ParamHandler });
+  )) as unknown as { GET: ParamHandler; POST: ParamHandler; PATCH: ParamHandler });
 });
 
 afterEach(() => {
@@ -94,6 +99,32 @@ afterEach(() => {
 
 afterAll(() => {
   testDb.close();
+});
+
+describe("GET /api/clips/:id/crop", () => {
+  it("returns a null crop for a clip that has none yet", async () => {
+    const { clipId } = seedClip();
+    const res = await get(String(clipId));
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { crop: unknown }).toEqual({ crop: null });
+  });
+
+  it("returns the stored crop after a manual override", async () => {
+    const { clipId } = seedClip();
+    const written = await patch(String(clipId), { keyframe: KF, aspectRatio: "9:16" });
+    expect(written.status).toBe(200);
+
+    const res = await get(String(clipId));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { crop: { aspectRatio: string; locked: boolean } };
+    expect(body.crop.aspectRatio).toBe("9:16");
+    expect(body.crop.locked).toBe(true);
+  });
+
+  it("404s for a missing clip and 400s for a bad id", async () => {
+    expect((await get("99999")).status).toBe(404);
+    expect((await get("abc")).status).toBe(400);
+  });
 });
 
 describe("POST /api/clips/:id/crop", () => {

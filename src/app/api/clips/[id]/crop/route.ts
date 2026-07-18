@@ -47,6 +47,28 @@ function readState(clipId: number): Record<string, unknown> {
 }
 
 /**
+ * GET /api/clips/:id/crop — the clip's current crop plan, or `null` when it has
+ * none yet. The editor reads this on load and re-reads it while polling after a
+ * "re-run auto" so the overlay reflects what the worker wrote. Read-only: it never
+ * touches the DB beyond the select, so it is safe to call repeatedly.
+ *
+ * Response: `{ crop: CropState | null }`.
+ */
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const id = parseId((await params).id);
+  if (id === null) {
+    return badRequest("Clip id must be a positive integer", "invalid_id");
+  }
+
+  const clip = loadClip(id);
+  if (!clip) {
+    return NextResponse.json({ error: `No clip with id ${id}`, code: "not_found" }, { status: 404 });
+  }
+
+  return NextResponse.json({ crop: readCropState(readState(id)) });
+}
+
+/**
  * POST /api/clips/:id/crop — enqueue an automatic smart-crop for one aspect ratio.
  *
  * Media work never runs in a request handler (global constraint), so this only

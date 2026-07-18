@@ -3,9 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CaptionEditor } from "./_components/caption-editor";
+import { CropPanel } from "./_components/crop-panel";
 import { parseId } from "@/lib/api/params";
 import type { CaptionDoc } from "@/lib/captions/ass";
 import { buildCaptionDoc, readCaptionDoc } from "@/lib/captions/edit";
+import { readCropState, type CropState } from "@/lib/crop/state";
 import { db } from "@/lib/db";
 import { clipEdits, clips, projects, transcripts } from "@/lib/db/schema";
 import { formatDuration } from "@/lib/projects/view";
@@ -51,14 +53,16 @@ export default async function ClipEditorPage({ params }: { params: Promise<{ id:
   if (!project) notFound();
 
   const edit = db.select({ state: clipEdits.state }).from(clipEdits).where(eq(clipEdits.clipId, id)).get();
-  let doc: CaptionDoc | null = null;
+  let parsedState: unknown = null;
   if (edit) {
     try {
-      doc = readCaptionDoc(JSON.parse(edit.state));
+      parsedState = JSON.parse(edit.state);
     } catch {
-      doc = null;
+      parsedState = null;
     }
   }
+  let doc: CaptionDoc | null = parsedState === null ? null : readCaptionDoc(parsedState);
+  const crop: CropState | null = readCropState(parsedState);
   if (doc === null) {
     const transcript = db
       .select({ segments: transcripts.segments })
@@ -86,6 +90,16 @@ export default async function ClipEditorPage({ params }: { params: Promise<{ id:
           </h1>
           <p className="font-mono text-sm tabular-nums text-zinc-500 dark:text-zinc-400">{range}</p>
         </header>
+
+        <CropPanel
+          clipId={clip.id}
+          projectId={clip.projectId}
+          inPoint={clip.inPoint}
+          outPoint={clip.outPoint}
+          srcWidth={project.width ?? 0}
+          srcHeight={project.height ?? 0}
+          initialCrop={crop}
+        />
 
         <CaptionEditor
           clipId={clip.id}

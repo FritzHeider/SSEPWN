@@ -59,7 +59,7 @@ function clamp(value: number, lo: number, hi: number): number {
  * Rounded to whole pixels — the ≤0.5 px rounding keeps the realised ratio within
  * the spec's 1 px tolerance while giving ffmpeg integer crop dimensions.
  */
-function cropSize(srcW: number, srcH: number, arValue: number): { w: number; h: number } {
+export function cropSize(srcW: number, srcH: number, arValue: number): { w: number; h: number } {
   const srcAR = srcW / srcH;
   let w: number;
   let h: number;
