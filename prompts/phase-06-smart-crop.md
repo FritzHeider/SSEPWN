@@ -71,9 +71,9 @@ Read `SPEC.md` first. Prerequisite: Phase 05 complete.
 - [x] smart-crop job + storage in clip_edits
 - [x] Crop APIs (auto enqueue, manual override, locked keyframes)
 - [x] Editor UI: AR switcher + draggable crop overlay
-- [ ] All listed tests green without TF models
-- [ ] All acceptance criteria verified in one iteration
-- [ ] PHASE_COMPLETE
+- [x] All listed tests green without TF models
+- [x] All acceptance criteria verified in one iteration
+- [x] PHASE_COMPLETE
 
 ## Completion signal (ralph-orchestrator)
 
