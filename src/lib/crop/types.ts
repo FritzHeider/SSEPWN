@@ -83,3 +83,38 @@ export function parseAspectRatio(value: unknown): AspectRatio {
     `Invalid aspectRatio ${JSON.stringify(value)} — expected one of ${ASPECT_RATIOS.join(", ")}`,
   );
 }
+
+/**
+ * One sampled frame's worth of detector output on the way into `planCrop`: a
+ * timestamp (seconds from clip start) and the boxes found in that frame. The
+ * smart-crop job builds these by walking `sampleFrames` output in time order and
+ * calling a `SubjectDetector` on each; `planCrop` never sees a raw frame, only
+ * this reduced shape, which keeps it pure and hand-testable.
+ */
+export interface FrameSample {
+  /** Seconds from the start of the clip. */
+  t: number;
+  /** Subjects detected in this frame (normalised), possibly empty. */
+  boxes: Box[];
+}
+
+/**
+ * A crop-window keyframe in SOURCE PIXEL space: at time `t` the reframe window's
+ * top-left sits at `(x, y)` with size `w × h`. `w`/`h` carry the chosen aspect
+ * ratio (within 1 px) and stay constant across a plan — only the window pans —
+ * so `cropFilter` can interpolate position piecewise-linearly between keyframes
+ * and hand ffmpeg a single `crop=w:h:x:y` per segment. Stored in
+ * `clip_edits.crop` alongside the chosen `AspectRatio`.
+ */
+export interface CropKeyframe {
+  /** Seconds from the start of the clip. */
+  t: number;
+  /** Crop-window left edge, source pixels. */
+  x: number;
+  /** Crop-window top edge, source pixels. */
+  y: number;
+  /** Crop-window width, source pixels (targetAR within 1 px, constant per plan). */
+  w: number;
+  /** Crop-window height, source pixels (constant per plan). */
+  h: number;
+}

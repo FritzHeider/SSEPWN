@@ -66,7 +66,7 @@ Read `SPEC.md` first. Prerequisite: Phase 05 complete.
 - [x] SubjectDetector interface + types (Box/AspectRatio) + FakeDetector
 - [ ] HumanFaceDetector impl (@vladmandic/human, models via make-fixtures.sh)
 - [ ] Frame sampling
-- [ ] planCrop with smoothing/dead-zone/fallback (pure)
+- [x] planCrop with smoothing/dead-zone/fallback (pure)
 - [ ] cropFilter expression builder + one real ffmpeg integration test
 - [ ] smart-crop job + storage in clip_edits
 - [ ] Crop APIs (auto enqueue, manual override, locked keyframes)
