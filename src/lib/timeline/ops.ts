@@ -12,6 +12,7 @@
 
 import { assertValidDoc } from "./state";
 import {
+  AUDIO_MAX_VOLUME,
   MIN_SEGMENT_DURATION,
   TIME_EPSILON,
   TimelineError,
@@ -186,6 +187,24 @@ export function deleteSegment(doc: TimelineDoc, segId: string): TimelineDoc {
   }
   const segments = doc.segments.filter((s) => s.id !== segId);
   return assertValidDoc({ ...doc, segments });
+}
+
+/**
+ * Set the clip's audio gain, clamped to `[0, AUDIO_MAX_VOLUME]` (the same range
+ * `readAudio` enforces on load) so the slider can never persist an out-of-range
+ * value. A non-finite input throws rather than silently zeroing the track. Audio
+ * settings are not structural, but the op still round-trips through
+ * `assertValidDoc` so it composes with the others on the undo stack.
+ */
+export function setVolume(doc: TimelineDoc, volume: number): TimelineDoc {
+  if (!Number.isFinite(volume)) throw new TimelineError("Volume must be a finite number");
+  const clamped = clamp(volume, 0, AUDIO_MAX_VOLUME);
+  return assertValidDoc({ ...doc, audio: { ...doc.audio, volume: clamped } });
+}
+
+/** Mute or unmute the clip's source audio (independent of the volume value). */
+export function setMuted(doc: TimelineDoc, muted: boolean): TimelineDoc {
+  return assertValidDoc({ ...doc, audio: { ...doc.audio, muted } });
 }
 
 /**

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { CaptionEditor } from "./_components/caption-editor";
 import { CropPanel } from "./_components/crop-panel";
+import { TimelinePanel } from "./_components/timeline-panel";
 import { parseId } from "@/lib/api/params";
 import type { CaptionDoc } from "@/lib/captions/ass";
 import { buildCaptionDoc, readCaptionDoc } from "@/lib/captions/edit";
@@ -11,6 +12,7 @@ import { readCropState, type CropState } from "@/lib/crop/state";
 import { db } from "@/lib/db";
 import { clipEdits, clips, projects, transcripts } from "@/lib/db/schema";
 import { formatDuration } from "@/lib/projects/view";
+import { buildTimelineDoc, readTimelineDoc } from "@/lib/timeline/state";
 import type { TranscriptSegment } from "@/lib/transcribe/types";
 
 // Reads clips / clip_edits / transcripts per request; nothing here is static.
@@ -72,6 +74,11 @@ export default async function ClipEditorPage({ params }: { params: Promise<{ id:
     doc = buildCaptionDoc(parseSegments(transcript?.segments), clip.inPoint, clip.outPoint);
   }
 
+  // The edited timeline lives in the same `clip_edits.state` blob; fall back to a
+  // fresh single-segment doc spanning the clip window (the GET route does the same
+  // and, like it, we do not persist the fresh doc — the first edit PATCHes it).
+  const timeline = readTimelineDoc(parsedState) ?? buildTimelineDoc(clip.inPoint, clip.outPoint);
+
   const title = clip.title ?? `Clip ${clip.id}`;
   const range = `${formatDuration(clip.inPoint)} – ${formatDuration(clip.outPoint)}`;
 
@@ -99,6 +106,13 @@ export default async function ClipEditorPage({ params }: { params: Promise<{ id:
           srcWidth={project.width ?? 0}
           srcHeight={project.height ?? 0}
           initialCrop={crop}
+        />
+
+        <TimelinePanel
+          clipId={clip.id}
+          projectId={clip.projectId}
+          initialDoc={timeline}
+          captionDoc={doc}
         />
 
         <CaptionEditor

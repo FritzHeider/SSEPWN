@@ -4,6 +4,8 @@ import {
   deleteSegment,
   reorder,
   segmentStarts,
+  setMuted,
+  setVolume,
   sourceTimeAt,
   splitAt,
   timelineTimeAt,
@@ -16,7 +18,12 @@ import {
   readTimelineDoc,
   withTimelineDoc,
 } from "../src/lib/timeline/state";
-import { MIN_SEGMENT_DURATION, TimelineError, type TimelineDoc } from "../src/lib/timeline/types";
+import {
+  AUDIO_MAX_VOLUME,
+  MIN_SEGMENT_DURATION,
+  TimelineError,
+  type TimelineDoc,
+} from "../src/lib/timeline/types";
 
 /** A clip from 10s to 30s of the source (20s window). */
 function doc(): TimelineDoc {
@@ -126,6 +133,30 @@ describe("reorder", () => {
     const d = splitAt(doc(), 5);
     expect(reorder(d, "seg-1", 99).segments.map((s) => s.id)).toEqual(["seg-2", "seg-1"]);
     expect(reorder(d, "seg-1", 0)).toBe(d);
+  });
+});
+
+describe("audio ops", () => {
+  it("setVolume clamps into [0, AUDIO_MAX_VOLUME] and keeps other fields", () => {
+    const d = doc();
+    expect(setVolume(d, 0.5).audio).toEqual({ volume: 0.5, muted: false });
+    expect(setVolume(d, 99).audio.volume).toBe(AUDIO_MAX_VOLUME);
+    expect(setVolume(d, -3).audio.volume).toBe(0);
+    // Volume does not disturb the mute flag or segments.
+    const muted = setMuted(d, true);
+    expect(setVolume(muted, 1.5).audio).toEqual({ volume: 1.5, muted: true });
+    expect(setVolume(d, 1).segments).toEqual(d.segments);
+  });
+
+  it("setVolume rejects a non-finite value", () => {
+    expect(() => setVolume(doc(), Number.NaN)).toThrow(TimelineError);
+    expect(() => setVolume(doc(), Number.POSITIVE_INFINITY)).toThrow(TimelineError);
+  });
+
+  it("setMuted toggles the flag without touching volume", () => {
+    const d = setVolume(doc(), 1.5);
+    expect(setMuted(d, true).audio).toEqual({ volume: 1.5, muted: true });
+    expect(setMuted(setMuted(d, true), false).audio).toEqual({ volume: 1.5, muted: false });
   });
 });
 
