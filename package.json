@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "worker": "tsx src/worker/index.ts",
     "fixtures": "bash scripts/make-fixtures.sh",
     "db:migrate": "mkdir -p data && drizzle-kit migrate"
@@ -29,6 +30,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/busboy": "^1.5.4",

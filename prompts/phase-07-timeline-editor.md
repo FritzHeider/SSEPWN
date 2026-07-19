@@ -63,7 +63,7 @@ UI-heavy; keep the timeline STATE pure and tested, the React layer thin.
 - [x] Undo/redo
 - [x] Persistence API (GET/PATCH /api/clips/:id/timeline)
 - [x] Optimistic client save wiring (debounced PATCH from editor — with UI item)
-- [ ] Playwright e2e for split/delete/persist
+- [x] Playwright e2e for split/delete/persist
 - [ ] All acceptance criteria verified in one iteration
 - [ ] PHASE_COMPLETE
 

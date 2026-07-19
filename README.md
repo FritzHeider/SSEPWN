@@ -39,6 +39,19 @@ npm test             # vitest unit + integration suite
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` / `npm run test:watch` | Vitest |
+| `npm run test:e2e` | Playwright end-to-end (timeline editor) |
+
+### End-to-end tests (Playwright)
+
+`npm run test:e2e` drives the real editor in a headless browser. Install the
+browser once (the config seeds its own throwaway DB + a generated source video
+via ffmpeg, and does a production `next build` before serving, so nothing else
+is required):
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
 
 ## Transcription
 

@@ -62,6 +62,8 @@ export function TimelineStrip({
           {boxes.map((box) => (
             <div
               key={box.id}
+              data-testid="timeline-segment"
+              data-segment-id={box.id}
               onPointerDown={(e) => onReorderStart(e, box.id)}
               onClick={() => onSelect(box.id)}
               className={`absolute top-1 bottom-1 flex touch-none flex-col justify-center overflow-hidden rounded-md border px-2 text-[10px] tabular-nums ${
