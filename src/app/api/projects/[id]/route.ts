@@ -5,6 +5,7 @@ import { parseId } from "@/lib/api/params";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { createJobQueue } from "@/lib/jobs";
+import { deleteProject } from "@/lib/projects/delete";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,4 +29,25 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
 
   return NextResponse.json({ project, jobs: createJobQueue(db).listByProject(id) });
+}
+
+/**
+ * DELETE /api/projects/:id — remove a project with all its clips, edits,
+ * exports, transcripts, jobs and assets, and unlink the files they named.
+ *
+ * Returns the per-table row counts so the caller (and the cascade test) can see
+ * exactly what the delete reached. A missing project is a 404, matching GET.
+ */
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const id = parseId((await params).id);
+  if (id === null) {
+    return NextResponse.json({ error: "Project id must be a positive integer", code: "invalid_id" }, { status: 400 });
+  }
+
+  const result = deleteProject(db, id);
+  if (!result.found) {
+    return NextResponse.json({ error: `No project with id ${id}`, code: "not_found" }, { status: 404 });
+  }
+
+  return NextResponse.json({ deleted: true, id, rows: result.rows });
 }
