@@ -6,7 +6,12 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assets, clips, projects } from "../src/lib/db/schema";
+import { buildCaptionDoc } from "../src/lib/captions/edit";
+import * as schema from "../src/lib/db/schema";
+import { assets, clipEdits, clips, projects } from "../src/lib/db/schema";
+import { seedBuiltinTemplates } from "../src/lib/templates/builtins";
+import { buildTimelineDoc } from "../src/lib/timeline/state";
+import type { TranscriptSegment } from "../src/lib/transcribe/types";
 
 /**
  * Seed harness for the Playwright timeline e2e (Phase 07).
@@ -33,6 +38,21 @@ export const SEEDED_CLIP_ID = 1;
  * across the whole run and never re-seeded between tests.
  */
 export const SEEDED_ENHANCE_CLIP_ID = 2;
+
+/**
+ * A THIRD seeded clip (autoincrement id 3), dedicated to the Phase-09 templates
+ * e2e. Unlike the others it is pre-seeded with an edit state (below): a
+ * `clean-sub` caption look and a single-segment timeline. Applying the
+ * `tiktok-bold` template must therefore VISIBLY change the caption style
+ * (clean-sub → bold-pop, white highlight → yellow, lowercase → uppercase) and,
+ * because a timeline is present, drop the template's "Follow for more" CTA onto
+ * the overlay track — the two things the acceptance criterion asserts.
+ */
+export const SEEDED_TEMPLATE_CLIP_ID = 3;
+
+/** The template clip's built-in `TikTok Bold` template name, as shown on its
+ * gallery card — the spec locates the card by this visible text. */
+export const TIKTOK_BOLD_NAME = "TikTok Bold";
 
 /** The seeded clip's source window, in seconds — long enough to split cleanly. */
 export const SEED_CLIP_IN = 0;
@@ -100,7 +120,7 @@ export function prepareSeedDb(): void {
   const sqlite = new Database(SEED_DB_PATH);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
-  const db = drizzle(sqlite);
+  const db = drizzle(sqlite, { schema });
   migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
 
   const [project] = db
@@ -134,7 +154,40 @@ export function prepareSeedDb(): void {
         title: "E2E enhancements clip",
         status: "candidate",
       },
+      // A third clip for the templates e2e (id 3); its edit state is seeded below.
+      {
+        projectId: project.id,
+        inPoint: SEED_CLIP_IN,
+        outPoint: SEED_CLIP_OUT,
+        title: "E2E templates clip",
+        status: "candidate",
+      },
     ])
+    .run();
+
+  // Pre-seed the templates clip's edit state: a `clean-sub` caption look (so a
+  // later `tiktok-bold` apply is a visible change) over one spoken line, plus a
+  // single-segment timeline (so applying the template has a clock to place its
+  // "Follow for more" CTA against — `applyTemplate` skips CTAs when a clip has
+  // no timeline yet). Written straight into `clip_edits.state`, the same blob
+  // the app reads, so `/clips/3` renders this state on first paint.
+  const transcript: TranscriptSegment[] = [
+    {
+      text: "hello world",
+      start: 0,
+      end: 4,
+      words: [
+        { word: "hello", start: 0, end: 2 },
+        { word: "world", start: 2, end: 4 },
+      ],
+    },
+  ];
+  const templateClipState = {
+    captions: buildCaptionDoc(transcript, SEED_CLIP_IN, SEED_CLIP_OUT, { preset: "clean-sub" }),
+    timeline: buildTimelineDoc(SEED_CLIP_IN, SEED_CLIP_OUT),
+  };
+  db.insert(clipEdits)
+    .values({ clipId: SEEDED_TEMPLATE_CLIP_ID, state: JSON.stringify(templateClipState) })
     .run();
 
   // A pre-probed B-roll video asset so the enhancements e2e can pick it from the
@@ -154,6 +207,12 @@ export function prepareSeedDb(): void {
       duration: 8,
     })
     .run();
+
+  // Seed the three built-in templates (migrate only creates the table). The
+  // templates e2e applies `tiktok-bold` from the gallery; a fresh DB gives the
+  // built-ins ids 1–3 in gallery order, but the spec finds the card by its
+  // visible name, not id.
+  seedBuiltinTemplates(db);
 
   sqlite.close();
 }

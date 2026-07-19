@@ -176,7 +176,7 @@ export function CaptionEditor({
         {/* Live HTML/CSS approximation of the burned-in captions (Phase 10 does
             the exact ASS render). Only the active cue is shown. */}
         {cue ? (
-          <div style={overlayWrapperStyle(style, scale)}>
+          <div data-testid="caption-overlay" style={overlayWrapperStyle(style, scale)}>
             <div className="flex flex-col items-center gap-1">
               {cue.lines.map((cueLine, i) => (
                 <div key={i} style={overlayLineStyle(style, scale)}>
