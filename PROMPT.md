@@ -65,7 +65,7 @@ checklist.
 - [x] Phase 04 — Highlight detection + auto-clipping (prompts/phase-04-highlights.md)
 - [x] Phase 05 — Auto captions (prompts/phase-05-captions.md)
 - [x] Phase 06 — Smart crop (prompts/phase-06-smart-crop.md)
-- [ ] Phase 07 — Timeline editor UI (prompts/phase-07-timeline-editor.md)
+- [x] Phase 07 — Timeline editor UI (prompts/phase-07-timeline-editor.md)
 - [ ] Phase 08 — B-roll, transitions, SFX, CTA overlays (prompts/phase-08-enhancements.md)
 - [ ] Phase 09 — Templates + platform presets (prompts/phase-09-templates.md)
 - [ ] Phase 10 — Export pipeline (prompts/phase-10-export.md)

@@ -64,8 +64,8 @@ UI-heavy; keep the timeline STATE pure and tested, the React layer thin.
 - [x] Persistence API (GET/PATCH /api/clips/:id/timeline)
 - [x] Optimistic client save wiring (debounced PATCH from editor — with UI item)
 - [x] Playwright e2e for split/delete/persist
-- [ ] All acceptance criteria verified in one iteration
-- [ ] PHASE_COMPLETE
+- [x] All acceptance criteria verified in one iteration
+- [x] PHASE_COMPLETE
 
 ## Completion signal (ralph-orchestrator)
 
