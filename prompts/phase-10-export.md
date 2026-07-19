@@ -72,7 +72,7 @@ the `renderPlan` structure from Phase 08 with real ffmpeg.
 - [x] SFX mix + ducking + loudnorm
 - [x] Progress parsing → job progress
 - [x] Export job handler: compile clip edit → render → data/exports file + exports row (jobId/error columns)
-- [ ] Export API: POST /api/clips/:id/export + GET /api/exports/:id + /download + quality presets
+- [x] Export API: POST /api/clips/:id/export + GET /api/exports/:id + /download + quality presets
 - [ ] Export UI + batch export + failure/retry
 - [ ] All listed integration tests green
 - [ ] All acceptance criteria verified in one iteration
