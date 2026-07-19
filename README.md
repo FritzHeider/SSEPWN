@@ -9,6 +9,52 @@ Everything runs locally: Next.js (App Router) + a Node worker process,
 SQLite (better-sqlite3 + Drizzle), and system FFmpeg via `execa`. No Docker,
 no Redis, no API keys, no GPU.
 
+## Architecture
+
+The Next.js app never does media work in a request handler — it only writes
+rows and enqueues jobs into a SQLite `jobs` table. A separate worker process
+(`npm run worker`) polls that table, claims one job at a time, and runs the
+long FFmpeg/whisper/detector work. Uploading a video enqueues a single
+`ingest` job; each pipeline handler enqueues the next step on success, so the
+whole chain runs automatically:
+
+```
+  Browser (Next.js UI)
+        │  upload
+        ▼
+  POST /api/projects ──────────► data/uploads/<uuid>  (source file)
+        │  INSERT project + asset rows
+        │  ENQUEUE ingest
+        ▼
+  jobs table (SQLite)  ◄─────────────── enqueue next step on success
+        ▲                                              │
+        │ claim (1 at a time, run_at/attempts)         │
+        │                                              │
+  Worker loop (src/worker) ──────────────────────────┘
+        │
+        ├─ ingest        probe duration/streams, thumbnail ─┐ enqueue
+        │                                                   ▼
+        ├─ transcribe    whisper → words/segments  (no audio → skip) ─┐
+        │                                                             ▼
+        └─ generate-clips highlight detection → auto-clips ───────────┘
+                                     │
+        on-demand, per user action:  ├─ smart-crop   (9:16 / 1:1 / 16:9 reframe)
+                                     └─ export        timeline → captions/crop
+                                                      → platform-ready .mp4
+```
+
+Failures stop the chain and mark the job `failed`; the project page offers a
+**retry from the failed step** action that re-queues the earliest failed
+pipeline job with its payload intact. A worker that crashes mid-job leaves the
+row `running`; on the next worker start `recoverStale()` re-queues rows older
+than the stale timeout (or fails them once attempts are exhausted, so a poison
+job cannot loop forever).
+
+Key modules: `src/lib/ffmpeg/` (every ffmpeg/ffprobe call, execa arg arrays
+only), `src/lib/jobs/` (queue + claim/recovery), `src/worker/handlers/` (one
+file per job type), `src/lib/transcribe/`, `src/lib/highlights/`, `src/lib/crop/`,
+and `src/lib/export/`.
+
 ## Prerequisites
 
 - Node.js 20+
@@ -39,7 +85,8 @@ npm test             # vitest unit + integration suite
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` / `npm run test:watch` | Vitest |
-| `npm run test:e2e` | Playwright end-to-end (timeline editor) |
+| `npm run test:e2e` | Playwright end-to-end (full upload→export journey + timeline editor) |
+| `npm run check` | Full gate: `lint && typecheck && test && build` (run before committing) |
 
 ### End-to-end tests (Playwright)
 
@@ -154,6 +201,19 @@ normalised boxes — not any particular faces, since `short-sample.mp4` is an
 ffmpeg test pattern with no faces in it.
 
 [@vladmandic/human]: https://github.com/vladmandic/human
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `npm run fixtures` or a job fails with `ffmpeg`/`ffprobe` **ENOENT** / `spawn ffmpeg` | FFmpeg not on PATH | Install it and reopen the shell: `brew install ffmpeg` (macOS) / `apt-get install ffmpeg` (Debian/Ubuntu). Verify with `ffmpeg -version` and `ffprobe -version`. |
+| Burn-in / captions integration test **skipped** | ffmpeg built without libass (`ass` filter absent) | Optional — install an ffmpeg with libass (`brew install ffmpeg` ships it). Exports still succeed; caption burn-in is dropped and the mp4 is produced without baked captions. |
+| A transcribe job fails naming `WHISPER_BIN`/`WHISPER_MODEL` | Real whisper selected but binary or model missing | Build whisper.cpp and download a model (see [Transcription](#transcription)), then set `WHISPER_BIN` and `WHISPER_MODEL`. For local dev without whisper, set `TRANSCRIBER=fake`. |
+| `TRANSCRIBER` startup error `unknown transcriber` | Typo in the env var | Use `fake` or `whisper` — an unrecognised value is rejected on purpose so a typo never silently reaches the real binary. |
+| A smart-crop job fails naming `@vladmandic/human` or `HUMAN_MODELS_PATH` | Real detector selected but package or models missing | `CROP_MODELS=1 npm run fixtures` to fetch the models, then `npm install @vladmandic/human @tensorflow/tfjs-node` (see [Smart crop](#smart-crop)). Both are opt-in; unit tests use `FakeDetector` and need neither. |
+| `npm test` cannot find the transcript for an uploaded file | Project name doesn't match a fixture transcript | The fake transcriber replays `tests/samples/transcripts/<name>.json` by project name; upload `long-sample.mp4` / `short-sample.mp4`, or add a matching JSON. |
+| `npm run test:e2e` fails to launch a browser | Playwright browser not installed | `npx playwright install chromium` once (see [End-to-end tests](#end-to-end-tests-playwright)). |
+| SQLite `database is locked` under heavy concurrency | Another process holds a write lock | Transient — the worker uses `busy_timeout` and retries. Ensure only one worker per DB file, or point workers at separate `SSECLONE_DB_PATH` values. |
 
 ## Repo layout
 
