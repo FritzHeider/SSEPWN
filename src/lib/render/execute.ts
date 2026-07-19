@@ -27,6 +27,7 @@ import type {
   BrollNode,
   ConcatNode,
   CropNode,
+  CtaNode,
   RenderNode,
   RenderPlan,
   SegmentNode,
@@ -59,8 +60,18 @@ const SUPPORTED_KINDS: ReadonlySet<RenderNode["kind"]> = new Set<RenderNode["kin
   "concat",
   "crop",
   "broll",
+  "cta",
   "audio",
 ]);
+
+/** Inset (fraction of frame) a corner/edge-anchored CTA keeps from the frame edge,
+ * matching the preview's `CTA_ANCHOR_MARGIN` (4%) so the burn lands where the
+ * editor showed it. */
+const CTA_ANCHOR_MARGIN = 0.04;
+
+/** In/out CTA animation length (seconds), clamped to half the overlay span so the
+ * in and out fades never overlap. Mirrors the preview's `CTA_ANIM_DURATION`. */
+const CTA_ANIM_DURATION = 0.4;
 
 /**
  * ffmpeg `xfade` transition name for each animated {@link TransitionNode.transition}
@@ -130,6 +141,191 @@ function brollFilter(
     `[${assetIdx}:v]${place},scale=${boxW}:-2[${src}]`,
     `[${inLabel}][${src}]overlay=x=${x}:y=${y}:${enable}[${outLabel}]`,
   ];
+}
+
+/** Where a CTA anchors in the frame, as fractions (`leftFrac`/`topFrac`) plus the
+ * self-translate (`tX`/`tY`, fraction of the element) that pins it to its 9-grid
+ * cell — mirrors {@link ctaAnchor} in `cta-view.ts` so burn == preview. */
+function ctaAnchorFrac(node: CtaNode): {
+  leftFrac: number;
+  topFrac: number;
+  tX: number;
+  tY: number;
+} {
+  const [row, col] = node.position.split("-") as [string, string];
+  const leftFrac =
+    (col === "left" ? CTA_ANCHOR_MARGIN : col === "right" ? 1 - CTA_ANCHOR_MARGIN : 0.5) +
+    node.offset.x;
+  const topFrac =
+    (row === "top" ? CTA_ANCHOR_MARGIN : row === "bottom" ? 1 - CTA_ANCHOR_MARGIN : 0.5) +
+    node.offset.y;
+  const tX = col === "left" ? 0 : col === "right" ? -1 : -0.5;
+  const tY = row === "top" ? 0 : row === "bottom" ? -1 : -0.5;
+  return { leftFrac, topFrac, tX, tY };
+}
+
+/** Effective in/out fade length for a CTA: {@link CTA_ANIM_DURATION}, capped at
+ * half the overlay span so the in/out windows stay disjoint. */
+function ctaFadeDur(node: CtaNode): number {
+  return Math.min(CTA_ANIM_DURATION, (node.end - node.start) / 2);
+}
+
+/**
+ * Convert a CSS colour string (`#rgb`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`,
+ * or a bare CSS/ffmpeg colour name) to an ffmpeg colour token (`0xRRGGBB` with an
+ * optional `@alpha` suffix). Falls back to the raw string for anything unrecognised
+ * (ffmpeg already understands named colours like `white`/`black`).
+ */
+function cssColorToFfmpeg(css: string): string {
+  const s = css.trim();
+  const hexN = (h: string): string => `0x${h.toUpperCase()}`;
+  const hex = /^#([0-9a-fA-F]{3,8})$/.exec(s);
+  if (hex) {
+    let h = hex[1];
+    if (h.length === 3 || h.length === 4) {
+      h = h
+        .split("")
+        .map((c) => c + c)
+        .join("");
+    }
+    if (h.length === 6) return hexN(h);
+    if (h.length === 8) {
+      const a = parseInt(h.slice(6, 8), 16) / 255;
+      return `${hexN(h.slice(0, 6))}@${fmtSeconds(a)}`;
+    }
+  }
+  const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([0-9.]+)\s*)?\)$/.exec(s);
+  if (rgb) {
+    const toHex = (n: string): string => Math.min(255, parseInt(n, 10)).toString(16).padStart(2, "0");
+    const base = hexN(toHex(rgb[1]) + toHex(rgb[2]) + toHex(rgb[3]));
+    return rgb[4] !== undefined ? `${base}@${fmtSeconds(Math.max(0, Math.min(1, Number(rgb[4]))))}` : base;
+  }
+  return s;
+}
+
+/** Escape a run of text so it survives the filtergraph parser as a `drawtext`
+ * value: backslash, colon, single-quote, comma and percent are the meta-chars a
+ * filter-option value must escape. */
+function drawtextEscape(text: string): string {
+  return text.replace(/[\\':,%]/g, (c) => `\\${c}`);
+}
+
+/**
+ * The alpha expression that fades a CTA in at its start and out at its end, or
+ * `null` when neither edge animates. `slide` is treated as a fade in this burn
+ * pass (see DEC-013). The two edge ramps are combined with `min` so an overlap on
+ * a very short span still resolves in `[0,1]`.
+ */
+function ctaAlphaExpr(node: CtaNode): string | null {
+  const d = ctaFadeDur(node);
+  const s = fmtSeconds(node.start);
+  const e = fmtSeconds(node.end);
+  const sd = fmtSeconds(node.start + d);
+  const ed = fmtSeconds(node.end - d);
+  const dd = fmtSeconds(d);
+  const animates = (a: CtaNode["animIn"]): boolean => a === "fade" || a === "slide";
+  const terms: string[] = [];
+  if (animates(node.animIn)) terms.push(`if(lt(t,${s}),0,if(lt(t,${sd}),(t-${s})/${dd},1))`);
+  if (animates(node.animOut)) terms.push(`if(gt(t,${e}),0,if(gt(t,${ed}),(${e}-t)/${dd},1))`);
+  if (terms.length === 0) return null;
+  return terms.length === 1 ? terms[0] : `min(${terms[0]},${terms[1]})`;
+}
+
+/**
+ * Filtergraph fragment(s) for a text CTA: a `drawtext` card anchored to its 9-grid
+ * cell (+ normalised offset), sized as a fraction of frame height, with the box
+ * background, gated to its window and fading in/out via an alpha ramp. `text_w`/
+ * `text_h` centre/right-anchor the box relative to its own measured size, matching
+ * the preview's translate. (Requires an ffmpeg built with libfreetype; the render
+ * is capability-gated, see DEC-013.)
+ */
+function ctaTextFilter(
+  node: CtaNode,
+  preset: PlatformPreset,
+  inLabel: string,
+  outLabel: string,
+): string[] {
+  const { width: W, height: H } = preset;
+  const { leftFrac, topFrac, tX, tY } = ctaAnchorFrac(node);
+  const fontSize = Math.max(1, Math.round(node.style.fontSize * H));
+  const anchorX = Math.round(leftFrac * W);
+  const anchorY = Math.round(topFrac * H);
+  const x = `${anchorX}${tX ? `+(${tX})*text_w` : ""}`;
+  const y = `${anchorY}${tY ? `+(${tY})*text_h` : ""}`;
+  const enable = `enable='between(t,${fmtSeconds(node.start)},${fmtSeconds(node.end)})'`;
+  const opts = [
+    `text=${drawtextEscape(node.content)}`,
+    `fontcolor=${cssColorToFfmpeg(node.style.color)}`,
+    `fontsize=${fontSize}`,
+    `box=1`,
+    `boxcolor=${cssColorToFfmpeg(node.style.background)}`,
+    `boxborderw=${Math.max(1, Math.round(fontSize * 0.35))}`,
+    `x=${x}`,
+    `y=${y}`,
+  ];
+  const alpha = ctaAlphaExpr(node);
+  if (alpha) opts.push(`alpha='${alpha}'`);
+  opts.push(enable);
+  return [`[${inLabel}]drawtext=${opts.join(":")}[${outLabel}]`];
+}
+
+/**
+ * Filtergraph fragment(s) for an image CTA: scale the asset to a box `0.4` of the
+ * frame wide (aspect preserved), give it an alpha channel, fade it in/out, then
+ * overlay it at the anchored cell, gated to its window. The asset is fed as a
+ * looped still (`-loop 1 -t duration`) so `fade` has frames to ramp over and the
+ * overlay persists across the window. `assetIdx` is the ffmpeg `-i` index.
+ */
+function ctaImageFilter(
+  node: CtaNode,
+  assetIdx: number,
+  i: number,
+  preset: PlatformPreset,
+  inLabel: string,
+  outLabel: string,
+): string[] {
+  const { width: W, height: H } = preset;
+  const { leftFrac, topFrac, tX, tY } = ctaAnchorFrac(node);
+  const boxW = Math.max(2, evenFloor(0.4 * W));
+  const d = ctaFadeDur(node);
+  const chain = [`scale=${boxW}:-2`, `format=rgba`];
+  const animates = (a: CtaNode["animIn"]): boolean => a === "fade" || a === "slide";
+  if (animates(node.animIn)) chain.push(`fade=t=in:st=${fmtSeconds(node.start)}:d=${fmtSeconds(d)}:alpha=1`);
+  if (animates(node.animOut))
+    chain.push(`fade=t=out:st=${fmtSeconds(node.end - d)}:d=${fmtSeconds(d)}:alpha=1`);
+  const src = `cimg${i}`;
+  const x = `${Math.round(leftFrac * W)}${tX ? `+(${tX})*overlay_w` : ""}`;
+  const y = `${Math.round(topFrac * H)}${tY ? `+(${tY})*overlay_h` : ""}`;
+  const enable = `enable='between(t,${fmtSeconds(node.start)},${fmtSeconds(node.end)})'`;
+  return [
+    `[${assetIdx}:v]${chain.join(",")}[${src}]`,
+    `[${inLabel}][${src}]overlay=x=${x}:y=${y}:${enable}[${outLabel}]`,
+  ];
+}
+
+/**
+ * Dispatch a CTA node to its variant renderer. A text card burns via `drawtext`;
+ * an image card overlays its asset. An `image` CTA with no asset (degenerate) is a
+ * pass-through so the video label still threads forward.
+ */
+function ctaFilter(
+  node: CtaNode,
+  inputIndex: Map<string, number>,
+  i: number,
+  preset: PlatformPreset,
+  inLabel: string,
+  outLabel: string,
+): string[] {
+  if (node.variant === "image") {
+    const assetId = node.inputs[1];
+    if (assetId === undefined) return [`[${inLabel}]null[${outLabel}]`];
+    const assetIdx = inputIndex.get(assetId);
+    if (assetIdx === undefined) {
+      throw new Error(`cta ${node.id} references unknown input ${assetId}`);
+    }
+    return ctaImageFilter(node, assetIdx, i, preset, inLabel, outLabel);
+  }
+  return ctaTextFilter(node, preset, inLabel, outLabel);
 }
 
 /** Everything {@link executePlan} needs to render one clip. */
@@ -251,7 +447,13 @@ export function buildRenderArgs(input: ExecutePlanInput): string[] {
     const p = inputPaths[mi.id];
     if (!p) throw new Error(`executePlan: inputPaths missing path for ${mi.id}`);
     inputIndex.set(mi.id, idx);
-    inputArgs.push("-i", p);
+    // A CTA image asset is a still: loop it across the edited timeline so `fade`
+    // has real frames and `overlay` holds it for its whole window.
+    if (mi.role === "cta-image") {
+      inputArgs.push("-loop", "1", "-t", fmtSeconds(plan.duration), "-i", p);
+    } else {
+      inputArgs.push("-i", p);
+    }
   });
 
   const segments = segmentNodes(plan);
@@ -315,22 +517,32 @@ export function buildRenderArgs(input: ExecutePlanInput): string[] {
     aSpine = runs[0].a;
   }
 
-  // Reframe to the delivery resolution, then thread the video through the
-  // overlay chain (B-roll now; CTA/captions in later chunks). The last node in
-  // the chain outputs the muxed `vout`; with no overlays the reframe is `vout`.
+  // Reframe to the delivery resolution, then thread the video through the overlay
+  // chain in plan order: B-roll (under), then CTA (over). Captions burn last in a
+  // later chunk. The last overlay outputs the muxed `vout`; with no overlays the
+  // reframe is `vout` directly.
   const brolls = plan.nodes.filter((n): n is BrollNode => n.kind === "broll");
-  const reframeOut = brolls.length > 0 ? "vbase" : "vout";
+  const ctas = plan.nodes.filter((n): n is CtaNode => n.kind === "cta");
+  const overlays: Array<{ kind: "broll"; node: BrollNode } | { kind: "cta"; node: CtaNode }> = [
+    ...brolls.map((node) => ({ kind: "broll" as const, node })),
+    ...ctas.map((node) => ({ kind: "cta" as const, node })),
+  ];
+  const reframeOut = overlays.length > 0 ? "vbase" : "vout";
   parts.push(reframeFilter(findCropNode(plan), preset, vSpine, reframeOut));
 
   let videoLabel = reframeOut;
-  brolls.forEach((node, i) => {
-    const assetId = node.inputs[1];
-    const assetIdx = inputIndex.get(assetId);
-    if (assetIdx === undefined) {
-      throw new Error(`broll ${node.id} references unknown input ${assetId}`);
+  overlays.forEach((ov, i) => {
+    const outLabel = i === overlays.length - 1 ? "vout" : `vov${i}`;
+    if (ov.kind === "broll") {
+      const assetId = ov.node.inputs[1];
+      const assetIdx = inputIndex.get(assetId);
+      if (assetIdx === undefined) {
+        throw new Error(`broll ${ov.node.id} references unknown input ${assetId}`);
+      }
+      parts.push(...brollFilter(ov.node, assetIdx, i, preset, videoLabel, outLabel));
+    } else {
+      parts.push(...ctaFilter(ov.node, inputIndex, i, preset, videoLabel, outLabel));
     }
-    const outLabel = i === brolls.length - 1 ? "vout" : `vov${i}`;
-    parts.push(...brollFilter(node, assetIdx, i, preset, videoLabel, outLabel));
     videoLabel = outLabel;
   });
 

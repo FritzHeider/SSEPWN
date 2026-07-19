@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { probe, probeFaststart } from "../src/lib/ffmpeg/exec";
@@ -17,11 +18,30 @@ import { PLATFORM_PRESETS } from "../src/lib/presets";
 import { addBroll } from "../src/lib/timeline/broll";
 import { addCta } from "../src/lib/timeline/cta";
 import { splitAt } from "../src/lib/timeline/ops";
+import { addSfx } from "../src/lib/timeline/sfx";
 import { buildTimelineDoc } from "../src/lib/timeline/state";
 import { setTransition } from "../src/lib/timeline/transitions";
 
 const SHORT_SAMPLE = "fixtures/short-sample.mp4";
 const BROLL_SAMPLE = "fixtures/broll-sample.mp4";
+const LOGO_SAMPLE = "fixtures/logo-sample.png";
+
+/**
+ * Whether the local ffmpeg was built with the `drawtext` filter (libfreetype).
+ * A text CTA burns via `drawtext`; minimal ffmpeg builds omit it, and `npm test`
+ * must stay green there, so the real text-burn assertion is gated on this probe
+ * (mirrors the `ass`/libass gate — DEC-010, DEC-013).
+ */
+async function drawtextAvailable(): Promise<boolean> {
+  try {
+    const { stdout } = await execa("ffmpeg", ["-hide_banner", "-filters"]);
+    return stdout.split("\n").some((line) => line.trim().split(/\s+/)[1] === "drawtext");
+  } catch {
+    return false;
+  }
+}
+
+const DRAWTEXT_AVAILABLE = await drawtextAvailable();
 
 /** A 4 s clip cut into two 2 s segments joined by a plain cut. */
 function twoSegmentPlan() {
@@ -143,13 +163,90 @@ describe("render/execute — buildRenderArgs (pure)", () => {
     expect(graph).toContain("overlay=x=0:y=0:enable='between(t,0.5,2)'[vout]");
   });
 
-  it("rejects a plan with a not-yet-supported node kind (CTA)", () => {
+  it("burns a text CTA with drawtext: anchored box, gated + faded to its window", () => {
     let doc = buildTimelineDoc(0, 4);
-    doc = addCta(doc, { start: 1, end: 3, content: "Follow" });
+    doc = addCta(doc, {
+      variant: "text",
+      content: "Follow for more",
+      start: 1,
+      end: 3,
+      position: "bottom-center",
+      animIn: "fade",
+      animOut: "fade",
+      style: { fontSize: 0.05, color: "#ffffff", background: "rgba(0, 0, 0, 0.6)" },
+    });
+    const args = buildRenderArgs({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: { "in:main": "/tmp/in.mp4" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+    });
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    // Reframe feeds the overlay chain, and the CTA outputs the muxed vout.
+    expect(graph).toContain("[vbase]");
+    expect(graph).toContain("drawtext=");
+    // Escaped text + converted CSS colours (rgba → 0xRRGGBB@a).
+    expect(graph).toContain("text=Follow for more");
+    expect(graph).toContain("boxcolor=0x000000@0.6");
+    expect(graph).toContain("fontcolor=0xFFFFFF");
+    // 5% of 1920 = 96 px text, bottom-center anchor centres on x (−0.5*text_w).
+    expect(graph).toContain("fontsize=96");
+    expect(graph).toContain("(-0.5)*text_w");
+    // Gated to 1..3 s and fading both edges (0.4 s) via an alpha ramp.
+    expect(graph).toContain("enable='between(t,1,3)'[vout]");
+    expect(graph).toContain("alpha='min(");
+  });
+
+  it("overlays an image CTA: scaled + faded asset over the anchored cell", () => {
+    let doc = buildTimelineDoc(0, 4);
+    doc = addCta(doc, {
+      variant: "image",
+      assetId: 12,
+      start: 0.5,
+      end: 2.5,
+      position: "top-right",
+      animIn: "fade",
+      animOut: "none",
+    });
+    const args = buildRenderArgs({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: { "in:main": "/tmp/in.mp4", "in:asset-12": "/tmp/logo.png" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+    });
+    // The still image is looped across the timeline as a second input.
+    expect(args).toContain("-loop");
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    // 0.4*1080 = 432 wide box, alpha channel, fade in only.
+    expect(graph).toContain("[1:v]scale=432:-2,format=rgba,fade=t=in:st=0.5:d=0.4:alpha=1[cimg0]");
+    // top-right anchor: right edge hangs off the anchor (−1*overlay_w), gated 0.5..2.5.
+    expect(graph).toContain("overlay=x=1037+(-1)*overlay_w:y=77:enable='between(t,0.5,2.5)'[vout]");
+  });
+
+  it("layers B-roll under a CTA in plan order (broll → cta → vout)", () => {
+    let doc = buildTimelineDoc(0, 4);
+    doc = addBroll(doc, { assetId: 9, start: 1, end: 3, mode: "pip", pip: { x: 0.5, y: 0.5, scale: 0.4 } });
+    doc = addCta(doc, { variant: "text", content: "Hi", start: 1, end: 3 });
+    const args = buildRenderArgs({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: { "in:main": "/tmp/in.mp4", "in:asset-9": "/tmp/b.mp4" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+    });
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    // B-roll is the first overlay (outputs vov0), the CTA closes the chain (vout).
+    expect(graph).toContain("[vbase][bpip0]overlay=x=540:y=960:enable='between(t,1,3)'[vov0]");
+    expect(graph).toContain("[vov0]drawtext=");
+    expect(graph).toContain("[vout]");
+  });
+
+  it("rejects a plan with a not-yet-supported node kind (SFX)", () => {
+    let doc = buildTimelineDoc(0, 4);
+    doc = addSfx(doc, { assetId: 5, t: 1 });
     expect(() =>
       buildRenderArgs({
         plan: renderPlan({ timeline: doc }),
-        inputPaths: { "in:main": "/tmp/in.mp4" },
+        inputPaths: { "in:main": "/tmp/in.mp4", "in:asset-5": "/tmp/sfx.wav" },
         outputPath: "/tmp/out.mp4",
         preset: PLATFORM_PRESETS.tiktok,
       }),
@@ -264,4 +361,88 @@ describe("render/execute — executePlan (ffmpeg integration)", () => {
     expect(info.height).toBe(1920);
     expect(info.hasAudio).toBe(true);
   }, 60_000);
+
+  it("renders a pip B-roll + image CTA clip; probe OK, duration unchanged", async () => {
+    expect(existsSync(LOGO_SAMPLE), `${LOGO_SAMPLE} missing (run npm run fixtures)`).toBe(true);
+    let doc = buildTimelineDoc(0, 4);
+    doc = addBroll(doc, {
+      assetId: 42,
+      start: 1,
+      end: 3,
+      mode: "pip",
+      pip: { x: 0.6, y: 0.1, scale: 0.3 },
+    });
+    doc = addCta(doc, {
+      variant: "image",
+      assetId: 7,
+      start: 0.5,
+      end: 3.5,
+      position: "top-right",
+      animIn: "fade",
+      animOut: "fade",
+    });
+    const out = path.join(dir, "broll-cta.mp4");
+    await executePlan({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: {
+        "in:main": SHORT_SAMPLE,
+        "in:asset-42": BROLL_SAMPLE,
+        "in:asset-7": LOGO_SAMPLE,
+      },
+      outputPath: out,
+      preset: PLATFORM_PRESETS.tiktok,
+      quality: "draft",
+    });
+
+    expect(existsSync(out)).toBe(true);
+    const info = await probe(out);
+    // Overlays never lengthen the base → the single 4 s segment stays ~4 s.
+    expect(info.duration).toBeGreaterThan(4 - 0.3);
+    expect(info.duration).toBeLessThan(4 + 0.3);
+    expect(info.width).toBe(1080);
+    expect(info.height).toBe(1920);
+    expect(info.hasAudio).toBe(true);
+  }, 60_000);
+
+  // Real drawtext burn — gated on a libfreetype ffmpeg build (DEC-013). On a
+  // minimal build the graph is still asserted by the pure tests above.
+  it.runIf(DRAWTEXT_AVAILABLE)(
+    "renders a text CTA (drawtext) clip; probe OK, duration unchanged",
+    async () => {
+      let doc = buildTimelineDoc(0, 4);
+      doc = addCta(doc, {
+        variant: "text",
+        content: "Follow for more",
+        start: 1,
+        end: 3,
+        position: "bottom-center",
+        animIn: "fade",
+        animOut: "fade",
+        style: { fontSize: 0.06, color: "#ffffff", background: "rgba(0, 0, 0, 0.6)" },
+      });
+      const out = path.join(dir, "cta-text.mp4");
+      await executePlan({
+        plan: renderPlan({ timeline: doc }),
+        inputPaths: { "in:main": SHORT_SAMPLE },
+        outputPath: out,
+        preset: PLATFORM_PRESETS.tiktok,
+        quality: "draft",
+      });
+
+      expect(existsSync(out)).toBe(true);
+      const info = await probe(out);
+      expect(info.duration).toBeGreaterThan(4 - 0.3);
+      expect(info.duration).toBeLessThan(4 + 0.3);
+      expect(info.width).toBe(1080);
+      expect(info.height).toBe(1920);
+    },
+    60_000,
+  );
+
+  it.skipIf(DRAWTEXT_AVAILABLE)(
+    "text CTA burn skipped: this ffmpeg build lacks the `drawtext` filter (libfreetype)",
+    () => {
+      expect(DRAWTEXT_AVAILABLE).toBe(false);
+    },
+  );
 });
