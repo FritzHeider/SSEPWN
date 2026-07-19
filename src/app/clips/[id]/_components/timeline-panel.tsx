@@ -30,6 +30,7 @@ import { BrollPanel } from "./broll-panel";
 import { BrollPreview } from "./broll-preview";
 import { CtaPanel } from "./cta-panel";
 import { CtaPreview } from "./cta-preview";
+import { TransitionsPanel } from "./transitions-panel";
 import { remapCaptions } from "@/lib/timeline/captions";
 import { advancePlayback, segmentIndexAt } from "@/lib/timeline/playback";
 import {
@@ -556,6 +557,8 @@ export function TimelinePanel({
         />
         <span className="font-mono tabular-nums text-zinc-400">{Math.round(doc.audio.volume * 100)}%</span>
       </div>
+
+      <TransitionsPanel doc={doc} onRun={run} />
 
       <BrollPanel doc={doc} projectId={projectId} playhead={playhead} onRun={run} />
 

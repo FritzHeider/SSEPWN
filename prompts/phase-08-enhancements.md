@@ -71,7 +71,7 @@ Read `SPEC.md` first. Prerequisite: Phase 07 complete.
 - [x] B-roll slots: model + ops + validation (pure lib)
 - [x] B-roll slots: editor + preview (pip and full)
 - [x] Transitions: model + validation (pure lib)
-- [ ] Transitions: picker UI (between segments)
+- [x] Transitions: picker UI (between segments)
 - [x] SFX track: model + ops + validation (pure lib)
 - [ ] SFX track: editor + WebAudio preview UI
 - [x] CTA overlays: model + presets (pure lib)
