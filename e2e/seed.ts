@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { clips, projects } from "../src/lib/db/schema";
+import { assets, clips, projects } from "../src/lib/db/schema";
 
 /**
  * Seed harness for the Playwright timeline e2e (Phase 07).
@@ -26,9 +26,25 @@ export const SEED_DB_PATH = path.join(process.cwd(), "data", "e2e.db");
  */
 export const SEEDED_CLIP_ID = 1;
 
+/**
+ * A SECOND seeded clip (autoincrement id 2), dedicated to the Phase-08
+ * enhancements e2e. Each spec owns its own clip so one spec's persisted edits
+ * (e.g. a B-roll overlay) never leak into another's — the seed DB is shared
+ * across the whole run and never re-seeded between tests.
+ */
+export const SEEDED_ENHANCE_CLIP_ID = 2;
+
 /** The seeded clip's source window, in seconds — long enough to split cleanly. */
 export const SEED_CLIP_IN = 0;
 export const SEED_CLIP_OUT = 6;
+
+/**
+ * The seeded B-roll asset's id. It is the only asset inserted, so a freshly
+ * migrated DB gives it autoincrement id 1 — the enhancements e2e picks it out of
+ * the B-roll asset library by that id. Pre-probed (width/height/duration set) so
+ * the picker lists it immediately without waiting on the worker.
+ */
+export const SEEDED_BROLL_ASSET_ID = 1;
 
 /** A tiny, browser-playable source video the editor's `<video>` can load. */
 export const SEED_VIDEO_PATH = path.join(process.cwd(), "data", "e2e-source.mp4");
@@ -102,12 +118,40 @@ export function prepareSeedDb(): void {
     .all();
 
   db.insert(clips)
+    .values([
+      {
+        projectId: project.id,
+        inPoint: SEED_CLIP_IN,
+        outPoint: SEED_CLIP_OUT,
+        title: "E2E clip",
+        status: "candidate",
+      },
+      // A second, identical clip for the enhancements e2e (id 2).
+      {
+        projectId: project.id,
+        inPoint: SEED_CLIP_IN,
+        outPoint: SEED_CLIP_OUT,
+        title: "E2E enhancements clip",
+        status: "candidate",
+      },
+    ])
+    .run();
+
+  // A pre-probed B-roll video asset so the enhancements e2e can pick it from the
+  // library and drop it on the clip. Reuses the seeded source file as its bytes
+  // (the `/api/assets/:id/file` route serves it if the overlay `<video>` loads;
+  // the persistence assertion only needs the DOM node, not decoded frames).
+  db.insert(assets)
     .values({
       projectId: project.id,
-      inPoint: SEED_CLIP_IN,
-      outPoint: SEED_CLIP_OUT,
-      title: "E2E clip",
-      status: "candidate",
+      type: "broll",
+      kind: "video",
+      mime: "video/mp4",
+      path: SEED_VIDEO_PATH,
+      originalName: "e2e-broll.mp4",
+      width: 320,
+      height: 180,
+      duration: 8,
     })
     .run();
 

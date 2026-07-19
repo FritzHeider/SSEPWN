@@ -77,10 +77,10 @@ Read `SPEC.md` first. Prerequisite: Phase 07 complete.
 - [x] CTA overlays: model + presets (pure lib)
 - [x] CTA overlays: animated DOM preview UI
 - [x] renderPlan pure compiler covering ALL features
-- [ ] Playwright e2e for B-roll + CTA persistence
-- [ ] All listed tests green
-- [ ] All acceptance criteria verified in one iteration
-- [ ] PHASE_COMPLETE
+- [x] Playwright e2e for B-roll + CTA persistence
+- [x] All listed tests green
+- [x] All acceptance criteria verified in one iteration
+- [x] PHASE_COMPLETE
 
 ## Completion signal (ralph-orchestrator)
 
