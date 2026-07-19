@@ -68,7 +68,7 @@ the whole product coherent and prove the full journey works.
 - [x] Full-journey Playwright test green
 - [x] Validation + error shape + worker crash recovery (zod body validation + centralized { error, code } shape; crash recovery done)
 - [x] Concurrent-upload test green
-- [ ] Cascade delete + no orphans
+- [x] Cascade delete + no orphans
 - [ ] README verified in clean clone
 - [ ] All acceptance criteria verified in one iteration
 - [ ] PHASE_COMPLETE
