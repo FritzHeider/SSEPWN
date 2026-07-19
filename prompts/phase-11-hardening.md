@@ -62,7 +62,7 @@ the whole product coherent and prove the full journey works.
 ## Status
 
 - [x] Dashboard + project page polish + status stepper
-- [ ] Auto pipeline chain + retry-from-failed-step
+- [x] Auto pipeline chain + retry-from-failed-step
 - [ ] Edge states (no audio, no highlights, very short)
 - [ ] Full-journey Playwright test green
 - [ ] Validation + error shape + worker crash recovery

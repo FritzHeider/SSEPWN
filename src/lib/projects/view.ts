@@ -154,12 +154,19 @@ const STEP_LABELS = ["Uploaded", "Transcribed", "Clips ready"] as const;
  * A `failed` project marks its first incomplete step failed — that is where the
  * chain stopped — while completed steps stay done, so "transcribed but clip
  * generation failed" reads correctly instead of blanking the whole strip.
+ *
+ * `options.failed` overrides the failure signal for cases the project row cannot
+ * express on its own: transcribe and generate-clips failures never set
+ * `status: "failed"` (those steps are additive), so the project page passes the
+ * result of a failed-job lookup to mark the stalled step red. Defaults to
+ * `status === "failed"` so existing callers are unchanged.
  */
 export function pipelineSteps(
   project: Pick<ProjectView, "status" | "transcribed" | "clipCount">,
+  options: { failed?: boolean } = {},
 ): PipelineStep[] {
   const done = [project.status !== "created", project.transcribed, project.clipCount > 0];
-  const failed = project.status === "failed";
+  const failed = options.failed ?? project.status === "failed";
   const firstIncomplete = done.indexOf(false);
 
   return STEP_LABELS.map((label, index) => {

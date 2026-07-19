@@ -3,10 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ProjectWorkspace } from "./_components/project-workspace";
+import { RetryPipelineButton } from "./_components/retry-pipeline-button";
 import { parseId } from "@/lib/api/params";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
+import { createJobQueue } from "@/lib/jobs";
 import { listClips } from "@/lib/projects/clips";
+import { findFailedStep, PIPELINE_STEP_LABELS } from "@/lib/projects/retry";
 import { readTranscript } from "@/lib/projects/transcript";
 import {
   EMPTY,
@@ -48,11 +51,18 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const badge = statusBadge(project);
   const duration = formatDuration(project.duration);
   const resolution = formatResolution(project.width, project.height);
-  const steps = pipelineSteps({
-    status: project.status,
-    transcribed: project.transcribed,
-    clipCount: clips.length,
-  });
+  // A stalled pipeline shows `failed` even when the failure was transcribe or
+  // generate-clips, which never mark the project row `failed`; the failed job is
+  // the durable signal, so read it and let the stepper and retry button use it.
+  const failedStep = findFailedStep(createJobQueue(db).listByProject(id));
+  const steps = pipelineSteps(
+    {
+      status: project.status,
+      transcribed: project.transcribed,
+      clipCount: clips.length,
+    },
+    { failed: Boolean(failedStep) },
+  );
 
   return (
     <div className="flex flex-1 justify-center bg-zinc-50 px-6 py-12 font-sans dark:bg-black">
@@ -75,6 +85,12 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
             <p className="text-sm text-red-700 dark:text-red-400">{badge.detail}</p>
           ) : null}
           <PipelineStepper steps={steps} />
+          {failedStep ? (
+            <RetryPipelineButton
+              projectId={id}
+              stepLabel={PIPELINE_STEP_LABELS[failedStep.type] ?? failedStep.type}
+            />
+          ) : null}
         </header>
 
         <ProjectWorkspace

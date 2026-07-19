@@ -183,6 +183,26 @@ describe("pipelineSteps", () => {
     ]);
   });
 
+  // Transcribe/generate-clips failures never set status "failed", so the page
+  // passes an explicit `failed` flag (from a failed-job lookup) to mark the
+  // stalled step red even though the project row still reads "ready".
+  it("marks the first incomplete step failed when options.failed overrides", () => {
+    expect(
+      pipelineSteps({ status: "ready", transcribed: true, clipCount: 0 }, { failed: true }).map(
+        (s) => `${s.label}:${s.state}`,
+      ),
+    ).toEqual(["Uploaded:done", "Transcribed:done", "Clips ready:failed"]);
+  });
+
+  // The override is a hint, not a hijack: false keeps a genuinely failed project
+  // red (default derives from status), so passing `failed: false` cannot hide a
+  // real failure — it only ever explains one the status column can't.
+  it("still respects a failed status when options.failed is not set", () => {
+    expect(
+      pipelineSteps({ status: "failed", transcribed: false, clipCount: 0 }).map((s) => s.state),
+    ).toContain("failed");
+  });
+
   // A brand-new `created` row has not even landed its bytes yet.
   it("treats a created project as not-yet-uploaded", () => {
     expect(labels({ status: "created", transcribed: false, clipCount: 0 })).toEqual([
