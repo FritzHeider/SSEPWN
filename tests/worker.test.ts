@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { jobs } from "../src/lib/db/schema";
 import { createJobQueue, type JobQueue } from "../src/lib/jobs";
 import type { HandlerRegistry } from "../src/worker/handlers";
 import { createWorker, type Worker } from "../src/worker/loop";
@@ -204,6 +206,30 @@ describe("worker loop", () => {
 
     await worker.start();
 
+    expect(queue.get(job.id)?.status).toBe("done");
+  });
+
+  // Crash recovery: a job left `running` by a previous (crashed) worker must be
+  // picked back up on the next worker's start, not stranded forever.
+  it("recovers and processes a stale running job left by a crashed worker", async () => {
+    const seen: number[] = [];
+    // Simulate the crashed worker: claim a job (status=running) but never finish
+    // it, then backdate updated_at so it looks abandoned.
+    const job = queue.enqueue("ingest", projectId);
+    const claimed = queue.claimNext();
+    expect(claimed?.status).toBe("running");
+    testDb.db.run(sql`UPDATE ${jobs} SET updated_at = unixepoch() - 3600 WHERE id = ${job.id}`);
+
+    const worker = startWorker({
+      ingest: async ({ job: j }) => {
+        seen.push(j.id);
+      },
+    });
+
+    await waitFor(() => queue.get(job.id)?.status === "done", "recovered job to finish");
+    await worker.stop();
+
+    expect(seen).toEqual([job.id]);
     expect(queue.get(job.id)?.status).toBe("done");
   });
 });

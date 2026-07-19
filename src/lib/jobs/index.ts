@@ -80,10 +80,18 @@ export interface JobQueue {
   updateProgress(id: number, progress: number): void;
   complete(id: number): void;
   fail(id: number, error: unknown): Job | null;
+  /**
+   * Re-queue jobs a crashed worker left `running`. See the implementation for
+   * the staleness rule and attempt-budget handling.
+   */
+  recoverStale(staleAfterMs?: number): { requeued: number; failed: number };
   get(id: number): Job | null;
   /** Every job for a project, oldest first. */
   listByProject(projectId: number): Job[];
 }
+
+/** Default staleness window before a `running` job is treated as abandoned. */
+export const DEFAULT_STALE_JOB_MS = 5 * 60 * 1000;
 
 /**
  * SQLite-backed job queue (SPEC.md § Tech stack — no Redis, no external
@@ -202,6 +210,46 @@ export function createJobQueue(db: JobsDb, options: JobQueueOptions = {}): JobQu
         const updated = tx.all<JobRow>(sql`SELECT * FROM ${jobs} WHERE ${jobs.id} = ${id}`);
         return rowToJob(updated[0]);
       });
+    },
+
+    /**
+     * Recover jobs a crashed worker left stuck in `running`. Nothing else clears
+     * that state: a process that dies mid-handler never calls `fail`, so without
+     * this the job would sit `running` forever and the pipeline would stall.
+     *
+     * A job is stale when its `updated_at` (bumped by every claim and progress
+     * update, so a live worker keeps it fresh) is older than `staleAfterMs`.
+     * Stale jobs with attempts left are re-queued for immediate reclaim; jobs
+     * that have already spent their attempt budget are marked `failed` instead,
+     * so a job that hard-crashes the worker can't loop forever. Call once on
+     * worker start, before the poll loop. Returns how many took each path.
+     *
+     * NOTE: `updated_at` is epoch SECONDS (schema), while `run_at`/`now()` are
+     * epoch MILLISECONDS — hence the divide-by-1000 for the cutoff.
+     */
+    recoverStale(staleAfterMs = DEFAULT_STALE_JOB_MS) {
+      const cutoffSeconds = Math.floor((now() - staleAfterMs) / 1000);
+      const nowMs = now();
+
+      const failedRows = db.all<JobRow>(sql`
+        UPDATE ${jobs}
+        SET status = 'failed',
+            error = 'Worker exited while this job was running; attempt budget exhausted',
+            updated_at = unixepoch()
+        WHERE status = 'running' AND updated_at < ${cutoffSeconds} AND attempts >= max_attempts
+        RETURNING *
+      `);
+
+      const requeuedRows = db.all<JobRow>(sql`
+        UPDATE ${jobs}
+        SET status = 'queued',
+            run_at = ${nowMs},
+            updated_at = unixepoch()
+        WHERE status = 'running' AND updated_at < ${cutoffSeconds} AND attempts < max_attempts
+        RETURNING *
+      `);
+
+      return { requeued: requeuedRows.length, failed: failedRows.length };
     },
 
     get,

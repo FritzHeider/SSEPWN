@@ -12,6 +12,11 @@ export interface WorkerOptions {
   handlers: HandlerRegistry;
   /** Idle poll interval; SPEC/phase-02 requires 500 ms in production. */
   pollMs?: number;
+  /**
+   * A `running` job untouched for longer than this on startup is assumed to be
+   * from a crashed worker and recovered. Defaults to the queue's own default.
+   */
+  staleJobMs?: number;
   logger?: WorkerLogger;
 }
 
@@ -57,7 +62,7 @@ function createSleeper(): Sleeper {
  * queue's claim is a single atomic UPDATE, so no two workers get the same job.
  */
 export function createWorker(options: WorkerOptions): Worker {
-  const { queue, db, handlers, pollMs = 500 } = options;
+  const { queue, db, handlers, pollMs = 500, staleJobMs } = options;
   const logger: WorkerLogger = options.logger ?? {
     log: (message) => console.log(message),
     error: (message) => console.error(message),
@@ -92,6 +97,14 @@ export function createWorker(options: WorkerOptions): Worker {
   }
 
   async function loop(): Promise<void> {
+    // Before polling, reclaim anything a previous worker left `running` when it
+    // crashed — otherwise those jobs are lost and the pipeline stalls.
+    const recovered = queue.recoverStale(staleJobMs);
+    if (recovered.requeued > 0 || recovered.failed > 0) {
+      logger.log(
+        `[worker] recovered ${recovered.requeued} stale job(s); failed ${recovered.failed} past their attempt budget`,
+      );
+    }
     logger.log(`[worker] polling every ${pollMs}ms`);
     while (!stopping) {
       const job = queue.claimNext();
