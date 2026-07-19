@@ -58,7 +58,7 @@ Read `SPEC.md` first. Prerequisite: Phase 08 complete.
 - [x] templates table + migration + idempotent seed of 3 built-ins
 - [x] applyTemplate pure function + undo snapshot
 - [x] Save-as-template
-- [ ] Platform preset constants + per-project/per-clip selection
+- [x] Platform preset constants + per-project/per-clip selection
 - [ ] Max-length warning badges
 - [ ] Template gallery + manage UI
 - [ ] Playwright e2e for apply-template

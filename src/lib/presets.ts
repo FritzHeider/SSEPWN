@@ -160,3 +160,67 @@ export function maxLengthWarning(preset: PlatformPreset, durationSec: number): s
   if (!exceedsMaxLength(preset, durationSec)) return null;
   return `${preset.label} ≤ ${formatMaxLength(preset.maxLengthSec as number)}`;
 }
+
+// ── Selection & persistence ──────────────────────────────────────────────────
+//
+// A clip's effective preset is layered: a per-clip override (persisted in the
+// clip's `clip_edits.state` blob under the reserved `platformPreset` key) wins,
+// then the project's default (`projects.platform_preset` column), then the
+// product default. The per-clip helpers touch only the `platformPreset` key so a
+// clip's timeline/crop/captions in the same blob survive, mirroring
+// `withTimelineDoc`/`withCropState`.
+
+/** Which level of the layering supplied the effective preset. */
+export type PresetSource = "clip" | "project" | "default";
+
+/** The effective preset for a clip plus which level it came from, so the UI can
+ * show "inherited from project" vs an explicit per-clip override. */
+export interface ResolvedPreset {
+  preset: PlatformPreset;
+  source: PresetSource;
+}
+
+/**
+ * Read a clip's per-clip preset override out of its parsed `clip_edits.state`
+ * blob, or `null` when unset/invalid (the clip then inherits the project
+ * default). A light guard over our own persisted data, like `readTimelineDoc`.
+ */
+export function readClipPreset(state: unknown): PlatformPresetId | null {
+  if (typeof state !== "object" || state === null) return null;
+  const id = (state as Record<string, unknown>).platformPreset;
+  return isPlatformPresetId(id) ? id : null;
+}
+
+/**
+ * Merge a per-clip preset override into a state blob, or clear it when `null` so
+ * the clip reverts to inheriting the project default. Returns a new object;
+ * only the `platformPreset` key is touched.
+ */
+export function withClipPreset(
+  state: Record<string, unknown>,
+  id: PlatformPresetId | null,
+): Record<string, unknown> {
+  const next = { ...state };
+  if (id === null) delete next.platformPreset;
+  else next.platformPreset = id;
+  return next;
+}
+
+/**
+ * Layered resolution of the preset governing a clip: a valid per-clip override
+ * wins, else a valid project default, else the product default. `source` names
+ * the level that supplied it. Invalid ids at either level are ignored (they fall
+ * through), so a stale/garbage value never breaks resolution.
+ */
+export function resolvePresetSelection(
+  clipPreset: unknown,
+  projectPreset: unknown,
+): ResolvedPreset {
+  if (isPlatformPresetId(clipPreset)) {
+    return { preset: PLATFORM_PRESETS[clipPreset], source: "clip" };
+  }
+  if (isPlatformPresetId(projectPreset)) {
+    return { preset: PLATFORM_PRESETS[projectPreset], source: "project" };
+  }
+  return { preset: PLATFORM_PRESETS[DEFAULT_PLATFORM_PRESET], source: "default" };
+}

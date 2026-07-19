@@ -8,7 +8,10 @@ import {
   exceedsMaxLength,
   formatMaxLength,
   maxLengthWarning,
+  readClipPreset,
   resolvePlatformPreset,
+  resolvePresetSelection,
+  withClipPreset,
 } from "../src/lib/presets";
 import { templates as templatesTable } from "../src/lib/db/schema";
 import { addSfx } from "../src/lib/timeline/sfx";
@@ -84,6 +87,49 @@ describe("platform presets", () => {
   it("resolves unknown ids to the default preset", () => {
     expect(resolvePlatformPreset("nope").id).toBe("tiktok");
     expect(resolvePlatformPreset("square").id).toBe("square");
+  });
+});
+
+describe("platform preset selection & persistence", () => {
+  it("reads a per-clip override out of a state blob, or null when unset/invalid", () => {
+    expect(readClipPreset({ platformPreset: "square" })).toBe("square");
+    expect(readClipPreset({ timeline: {} })).toBeNull();
+    expect(readClipPreset({ platformPreset: "nope" })).toBeNull();
+    expect(readClipPreset(null)).toBeNull();
+    expect(readClipPreset("not an object")).toBeNull();
+  });
+
+  it("writes/clears only the platformPreset key, preserving the rest of the blob", () => {
+    const blob = { timeline: { x: 1 }, crop: { y: 2 } };
+    const set = withClipPreset(blob, "instagram-reels");
+    expect(set).toEqual({ ...blob, platformPreset: "instagram-reels" });
+    // Original untouched (pure).
+    expect(blob).not.toHaveProperty("platformPreset");
+
+    const cleared = withClipPreset(set, null);
+    expect(cleared).toEqual(blob);
+    expect(cleared).not.toHaveProperty("platformPreset");
+  });
+
+  it("layers clip override over project default over product default", () => {
+    // Clip override wins.
+    expect(resolvePresetSelection("square", "youtube-shorts")).toEqual({
+      preset: PLATFORM_PRESETS.square,
+      source: "clip",
+    });
+    // No clip override → project default.
+    expect(resolvePresetSelection(null, "youtube-shorts")).toEqual({
+      preset: PLATFORM_PRESETS["youtube-shorts"],
+      source: "project",
+    });
+    // Neither → product default (tiktok).
+    expect(resolvePresetSelection(null, null)).toEqual({
+      preset: PLATFORM_PRESETS.tiktok,
+      source: "default",
+    });
+    // Garbage at either level falls through rather than sticking.
+    expect(resolvePresetSelection("bogus", "landscape").source).toBe("project");
+    expect(resolvePresetSelection("bogus", "bogus").source).toBe("default");
   });
 });
 
