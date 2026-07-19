@@ -30,6 +30,8 @@ import { BrollPanel } from "./broll-panel";
 import { BrollPreview } from "./broll-preview";
 import { CtaPanel } from "./cta-panel";
 import { CtaPreview } from "./cta-preview";
+import { SfxPanel } from "./sfx-panel";
+import { SfxPreview } from "./sfx-preview";
 import { TransitionsPanel } from "./transitions-panel";
 import { remapCaptions } from "@/lib/timeline/captions";
 import { advancePlayback, segmentIndexAt } from "@/lib/timeline/playback";
@@ -489,6 +491,7 @@ export function TimelinePanel({
         />
         <BrollPreview doc={doc} playhead={playhead} playing={playing} />
         <CtaPreview doc={doc} playhead={playhead} playing={playing} />
+        <SfxPreview doc={doc} playhead={playhead} playing={playing} />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -563,6 +566,8 @@ export function TimelinePanel({
       <BrollPanel doc={doc} projectId={projectId} playhead={playhead} onRun={run} />
 
       <CtaPanel doc={doc} projectId={projectId} playhead={playhead} onRun={run} />
+
+      <SfxPanel doc={doc} projectId={projectId} playhead={playhead} onRun={run} />
 
       {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
     </section>

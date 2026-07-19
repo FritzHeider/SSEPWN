@@ -73,7 +73,7 @@ Read `SPEC.md` first. Prerequisite: Phase 07 complete.
 - [x] Transitions: model + validation (pure lib)
 - [x] Transitions: picker UI (between segments)
 - [x] SFX track: model + ops + validation (pure lib)
-- [ ] SFX track: editor + WebAudio preview UI
+- [x] SFX track: editor + WebAudio preview UI
 - [x] CTA overlays: model + presets (pure lib)
 - [x] CTA overlays: animated DOM preview UI
 - [x] renderPlan pure compiler covering ALL features
