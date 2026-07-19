@@ -50,6 +50,8 @@ export function ClipsPanel({
   const [markOut, setMarkOut] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Guards the async poll and any late fetch from setting state after unmount.
@@ -129,6 +131,40 @@ export function ClipsPanel({
     }
   }, [projectId, refresh]);
 
+  // Batch "export all clips": queue one export job per clip (the worker renders
+  // them sequentially). Each POST uses the clip's own effective preset and final
+  // quality; per-clip progress and downloads live on each clip's editor page.
+  const exportAll = useCallback(async () => {
+    setExporting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      let queued = 0;
+      let failed = 0;
+      for (const clip of clips) {
+        try {
+          const response = await fetch(`/api/clips/${clip.id}/export`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          if (response.ok) queued += 1;
+          else failed += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      if (!alive.current) return;
+      setNotice(
+        `Queued ${queued} export${queued === 1 ? "" : "s"}` +
+          (failed > 0 ? ` (${failed} failed to queue)` : "") +
+          ". Open a clip to track progress and download.",
+      );
+    } finally {
+      if (alive.current) setExporting(false);
+    }
+  }, [clips]);
+
   const rangeError = manualRangeError(markIn, markOut, duration);
   const emptyMessage = clipsEmptyMessage(clips);
 
@@ -138,15 +174,32 @@ export function ClipsPanel({
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
           Clips
         </h2>
-        <button
-          type="button"
-          onClick={regenerate}
-          disabled={regenerating || busy}
-          className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-        >
-          {regenerating ? "Regenerating…" : "Regenerate"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="export-all"
+            onClick={exportAll}
+            disabled={exporting || busy || clips.length === 0}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            {exporting ? "Queuing…" : "Export all"}
+          </button>
+          <button
+            type="button"
+            onClick={regenerate}
+            disabled={regenerating || busy}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            {regenerating ? "Regenerating…" : "Regenerate"}
+          </button>
+        </div>
       </div>
+
+      {notice ? (
+        <p data-testid="export-all-notice" className="text-sm text-emerald-700 dark:text-emerald-400">
+          {notice}
+        </p>
+      ) : null}
 
       {/* Manual "add clip from current selection": mark the range off the live
           playhead, then commit it. */}
