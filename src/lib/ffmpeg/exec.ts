@@ -1,3 +1,5 @@
+import { open } from "node:fs/promises";
+
 import { execa, type Result } from "execa";
 
 export interface ProbeResult {
@@ -85,6 +87,52 @@ export async function probe(path: string): Promise<ProbeResult> {
     fps: parseFps(video.avg_frame_rate) || parseFps(video.r_frame_rate),
     hasAudio: streams.some((s) => s.codec_type === "audio"),
   };
+}
+
+/**
+ * Whether an MP4's `moov` atom precedes its `mdat` atom — i.e. the file was
+ * muxed with `+faststart` so a player can begin before the whole file downloads.
+ *
+ * Reads only the top-level box headers (8 or 16 bytes each), never the payload,
+ * so it is cheap even on large exports. Returns `false` for a file missing
+ * either atom or not a well-formed MP4 (rather than throwing) — callers treat a
+ * non-faststart or non-MP4 file the same way. Used by the export integration
+ * tests to prove the `-movflags +faststart` flag actually took effect.
+ */
+export async function probeFaststart(path: string): Promise<boolean> {
+  const fh = await open(path, "r");
+  try {
+    const { size } = await fh.stat();
+    const header = Buffer.alloc(16);
+    let offset = 0;
+    let moovAt = -1;
+    let mdatAt = -1;
+    while (offset + 8 <= size) {
+      const { bytesRead } = await fh.read(header, 0, 16, offset);
+      if (bytesRead < 8) break;
+      let boxSize = header.readUInt32BE(0);
+      const type = header.toString("ascii", 4, 8);
+      let headerLen = 8;
+      if (boxSize === 1) {
+        // 64-bit largesize in the next 8 bytes.
+        const high = header.readUInt32BE(8);
+        const low = header.readUInt32BE(12);
+        boxSize = high * 2 ** 32 + low;
+        headerLen = 16;
+      } else if (boxSize === 0) {
+        boxSize = size - offset; // extends to end of file
+      }
+      if (type === "moov" && moovAt < 0) moovAt = offset;
+      if (type === "mdat" && mdatAt < 0) mdatAt = offset;
+      if (moovAt >= 0 && mdatAt >= 0) break;
+      if (boxSize < headerLen) break; // malformed — bail rather than loop forever
+      offset += boxSize;
+    }
+    if (moovAt < 0 || mdatAt < 0) return false;
+    return moovAt < mdatAt;
+  } finally {
+    await fh.close();
+  }
 }
 
 /**
