@@ -45,6 +45,26 @@ export function emptyTranscriptMessage(
 }
 
 /**
+ * The explanation shown when a project's video has no audio track, or `null`
+ * when captions are (or may still become) available and no banner is warranted.
+ *
+ * `hasAudio` is nullable on purpose: `null` means the ingest probe has not run
+ * yet, which is not the same as "no audio". We must not tell a user captions are
+ * unavailable before we know they are, so only an explicit `false` disables them
+ * — mirroring how the transcribe handler only writes its no-audio note once the
+ * probe has actually reported a silent source.
+ */
+export function captionsDisabledMessage(hasAudio: boolean | null | undefined): string | null {
+  if (hasAudio === false) {
+    return (
+      "This video has no audio track, so captions are unavailable. " +
+      "Clips are generated from scene changes and visual energy instead."
+    );
+  }
+  return null;
+}
+
+/**
  * `m:ss` (or `h:mm:ss` past an hour) for a segment's start time.
  *
  * Delegates to the list's formatter rather than growing a second one: two mm:ss

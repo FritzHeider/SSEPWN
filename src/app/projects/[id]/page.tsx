@@ -9,7 +9,7 @@ import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { createJobQueue } from "@/lib/jobs";
 import { listClips } from "@/lib/projects/clips";
-import { findFailedStep, PIPELINE_STEP_LABELS } from "@/lib/projects/retry";
+import { clipGenerationComplete, findFailedStep, PIPELINE_STEP_LABELS } from "@/lib/projects/retry";
 import { readTranscript } from "@/lib/projects/transcript";
 import {
   EMPTY,
@@ -54,7 +54,12 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   // A stalled pipeline shows `failed` even when the failure was transcribe or
   // generate-clips, which never mark the project row `failed`; the failed job is
   // the durable signal, so read it and let the stepper and retry button use it.
-  const failedStep = findFailedStep(createJobQueue(db).listByProject(id));
+  const jobs = createJobQueue(db).listByProject(id);
+  const failedStep = findFailedStep(jobs);
+  // A zero-highlight video only offers manual clipping once generation has
+  // actually run and come back empty — before that an empty list just means
+  // "not yet", not "nothing to find".
+  const generationComplete = clipGenerationComplete(jobs);
   const steps = pipelineSteps(
     {
       status: project.status,
@@ -96,6 +101,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         <ProjectWorkspace
           projectId={id}
           duration={project.duration}
+          hasAudio={project.hasAudio}
+          generationComplete={generationComplete}
           transcript={transcript}
           initialClips={clips}
         />

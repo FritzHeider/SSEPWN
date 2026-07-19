@@ -83,8 +83,22 @@ describe("clipsEmptyMessage", () => {
     expect(clipsEmptyMessage([clip()])).toBeNull();
   });
 
-  it("invites action when the list is empty", () => {
+  it("invites action when the list is empty and generation has not run yet", () => {
     expect(clipsEmptyMessage([])).toMatch(/no clips yet/i);
+  });
+
+  // Same empty list, opposite meaning: generation ran and found nothing, so
+  // "come back later" would be a lie — offer manual clipping instead.
+  it("offers manual clipping when generation finished and found no highlights", () => {
+    const message = clipsEmptyMessage([], true);
+
+    expect(message).toMatch(/no highlights/i);
+    expect(message).toMatch(/mark an in-point/i);
+    expect(message).not.toMatch(/no clips yet/i);
+  });
+
+  it("says nothing when generation finished but clips exist", () => {
+    expect(clipsEmptyMessage([clip()], true)).toBeNull();
   });
 });
 

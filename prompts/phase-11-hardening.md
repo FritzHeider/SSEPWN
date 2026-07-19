@@ -64,7 +64,7 @@ the whole product coherent and prove the full journey works.
 - [x] Dashboard + project page polish + status stepper
 - [x] Auto pipeline chain + retry-from-failed-step
 - [x] Edge-state clipping (no-transcript scene/energy fallback + very-short whole-video clip + no-audio enqueues generate-clips)
-- [ ] Edge-state UI (captions-disabled explanation + zero-highlight manual-clip offer)
+- [x] Edge-state UI (captions-disabled explanation + zero-highlight manual-clip offer)
 - [ ] Full-journey Playwright test green
 - [ ] Validation + error shape + worker crash recovery
 - [ ] Concurrent-upload test green

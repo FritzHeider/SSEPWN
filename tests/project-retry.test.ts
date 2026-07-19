@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { jobs, projects } from "../src/lib/db/schema";
 import { createJobQueue, type Job } from "../src/lib/jobs";
-import { findFailedStep, retryPipeline } from "../src/lib/projects/retry";
+import { clipGenerationComplete, findFailedStep, retryPipeline } from "../src/lib/projects/retry";
 import { createTestDb, type TestDb } from "./helpers/db";
 
 type Handler = (request: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response>;
@@ -98,6 +98,21 @@ describe("findFailedStep", () => {
 
   it("ignores failed jobs that are not part of the auto pipeline", () => {
     expect(findFailedStep([job("export", "failed"), job("smart-crop", "failed")])).toBeNull();
+  });
+
+  describe("clipGenerationComplete", () => {
+    it("is true once a generate-clips job has finished", () => {
+      expect(clipGenerationComplete([job("ingest", "done"), job("generate-clips", "done")])).toBe(true);
+    });
+
+    it("is false while generation is still queued, running, or failed", () => {
+      expect(clipGenerationComplete([job("generate-clips", "running")])).toBe(false);
+      expect(clipGenerationComplete([job("generate-clips", "failed")])).toBe(false);
+    });
+
+    it("is false before generation is even enqueued", () => {
+      expect(clipGenerationComplete([job("ingest", "done"), job("transcribe", "running")])).toBe(false);
+    });
   });
 });
 

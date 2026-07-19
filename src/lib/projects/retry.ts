@@ -40,6 +40,19 @@ export function findFailedStep(jobs: readonly Job[]): Job | null {
   return null;
 }
 
+/**
+ * Whether the generate-clips step has run to completion at least once.
+ *
+ * A `done` generate-clips job is the one durable signal that the auto-highlight
+ * pass actually finished — distinct from "not enqueued yet" (upload still in the
+ * transcribe leg) and from "failed" (a stall the retry button handles). The
+ * clips panel uses it to tell a genuinely zero-highlight video (offer manual
+ * clipping) apart from one whose generation simply has not happened yet.
+ */
+export function clipGenerationComplete(jobs: readonly Job[]): boolean {
+  return jobs.some((job) => job.type === "generate-clips" && job.status === "done");
+}
+
 export type RetryReason = "project_not_found" | "no_failed_step";
 
 export interface RetryResult {

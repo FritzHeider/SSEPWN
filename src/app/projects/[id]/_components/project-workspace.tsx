@@ -9,6 +9,7 @@ import type { ProjectTranscript } from "@/lib/projects/transcript";
 import {
   NO_ACTIVE_SEGMENT,
   activeSegmentIndex,
+  captionsDisabledMessage,
   emptyTranscriptMessage,
   formatTimestamp,
   sourceVideoUrl,
@@ -29,11 +30,17 @@ import {
 export function ProjectWorkspace({
   projectId,
   duration,
+  hasAudio,
+  generationComplete,
   transcript,
   initialClips,
 }: {
   projectId: number;
   duration: number | null;
+  /** null until the ingest probe runs; false disables captions with a reason. */
+  hasAudio: boolean | null;
+  /** True once generate-clips has finished — drives the zero-highlight offer. */
+  generationComplete: boolean;
   transcript: ProjectTranscript;
   initialClips: ProjectClip[];
 }) {
@@ -44,6 +51,7 @@ export function ProjectWorkspace({
   const [activeIndex, setActiveIndex] = useState(NO_ACTIVE_SEGMENT);
   const { segments } = transcript;
   const emptyMessage = emptyTranscriptMessage(transcript);
+  const captionsDisabled = captionsDisabledMessage(hasAudio);
 
   const seekTo = useCallback((seconds: number) => {
     const video = videoRef.current;
@@ -78,8 +86,16 @@ export function ProjectWorkspace({
 
   return (
     <div className="flex flex-col gap-8">
-      {/* No <track> yet: captions are Phase 05. Until then the transcript below
-          is this video's accessible text. */}
+      {captionsDisabled ? (
+        <p
+          data-testid="captions-disabled"
+          role="status"
+          className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
+        >
+          {captionsDisabled}
+        </p>
+      ) : null}
+
       <video
         ref={videoRef}
         src={sourceVideoUrl(projectId)}
@@ -92,6 +108,7 @@ export function ProjectWorkspace({
       <ClipsPanel
         projectId={projectId}
         duration={duration}
+        generationComplete={generationComplete}
         initialClips={initialClips}
         onPreview={previewRange}
         getCurrentTime={getCurrentTime}

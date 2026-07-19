@@ -35,12 +35,15 @@ const POLL_INTERVAL_MS = 1500;
 export function ClipsPanel({
   projectId,
   duration,
+  generationComplete = false,
   initialClips,
   onPreview,
   getCurrentTime,
 }: {
   projectId: number;
   duration: number | null;
+  /** True once generate-clips has run: an empty list then offers manual clipping. */
+  generationComplete?: boolean;
   initialClips: ProjectClip[];
   onPreview: (inPoint: number, outPoint: number) => void;
   getCurrentTime: () => number;
@@ -166,7 +169,7 @@ export function ClipsPanel({
   }, [clips]);
 
   const rangeError = manualRangeError(markIn, markOut, duration);
-  const emptyMessage = clipsEmptyMessage(clips);
+  const emptyMessage = clipsEmptyMessage(clips, generationComplete);
 
   return (
     <section className="flex flex-col gap-3">
@@ -239,7 +242,10 @@ export function ClipsPanel({
       {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
 
       {emptyMessage ? (
-        <p className="rounded-lg border border-zinc-200 p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+        <p
+          data-testid="clips-empty"
+          className="rounded-lg border border-zinc-200 p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400"
+        >
           {emptyMessage}
         </p>
       ) : (

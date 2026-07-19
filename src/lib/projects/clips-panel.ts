@@ -55,11 +55,25 @@ export function clipScoreLabel(clip: Pick<ProjectClip, "score">): string | null 
  * there are clips and the panel should just render them.
  *
  * An empty list is the normal first state of a ready project whose generate-clips
- * job has not run (or found nothing), not an error, so it reads as an invitation
- * rather than a failure.
+ * job has not run yet, not an error, so it reads as an invitation rather than a
+ * failure.
+ *
+ * `generationComplete` splits the two empty states apart, because they mean
+ * opposite things to the user. Before generation finishes the list is empty only
+ * because there is nothing yet — "come back". Once generation has run and STILL
+ * found nothing (a zero-highlight video: no speech, flat energy, no scene cuts),
+ * regenerating will keep finding nothing, so the honest next step is to offer
+ * manual clipping directly. Defaults to `false` so existing callers — and any
+ * caller that cannot cheaply learn the job state — keep the neutral message.
  */
-export function clipsEmptyMessage(clips: readonly unknown[]): string | null {
+export function clipsEmptyMessage(
+  clips: readonly unknown[],
+  generationComplete = false,
+): string | null {
   if (clips.length > 0) return null;
+  if (generationComplete) {
+    return "No highlights were found automatically. Mark an in-point and out-point on the player above to add a clip yourself.";
+  }
   return "No clips yet. Regenerate highlights or add one from the player.";
 }
 

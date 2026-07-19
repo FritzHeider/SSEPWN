@@ -4,6 +4,7 @@ import { FakeTranscriber } from "../src/lib/transcribe/fake";
 import {
   NO_ACTIVE_SEGMENT,
   activeSegmentIndex,
+  captionsDisabledMessage,
   emptyTranscriptMessage,
   formatTimestamp,
   sourceVideoUrl,
@@ -114,6 +115,23 @@ describe("activeSegmentIndex", () => {
 describe("sourceVideoUrl", () => {
   it("points at the project's video route", () => {
     expect(sourceVideoUrl(7)).toBe("/api/projects/7/video");
+  });
+});
+
+describe("captionsDisabledMessage", () => {
+  it("explains that a no-audio video cannot be captioned", () => {
+    const message = captionsDisabledMessage(false);
+
+    expect(message).toMatch(/no audio/i);
+    expect(message).toMatch(/captions are unavailable/i);
+  });
+
+  // null means the ingest probe has not run — we do not yet know whether there
+  // is audio, so we must not claim captions are unavailable.
+  it("stays silent until the probe has decided (null / true)", () => {
+    expect(captionsDisabledMessage(null)).toBeNull();
+    expect(captionsDisabledMessage(true)).toBeNull();
+    expect(captionsDisabledMessage(undefined)).toBeNull();
   });
 });
 
