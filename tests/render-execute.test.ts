@@ -15,11 +15,13 @@ import {
 import { renderPlan } from "../src/lib/render/plan";
 import { PLATFORM_PRESETS } from "../src/lib/presets";
 import { addBroll } from "../src/lib/timeline/broll";
+import { addCta } from "../src/lib/timeline/cta";
 import { splitAt } from "../src/lib/timeline/ops";
 import { buildTimelineDoc } from "../src/lib/timeline/state";
 import { setTransition } from "../src/lib/timeline/transitions";
 
 const SHORT_SAMPLE = "fixtures/short-sample.mp4";
+const BROLL_SAMPLE = "fixtures/broll-sample.mp4";
 
 /** A 4 s clip cut into two 2 s segments joined by a plain cut. */
 function twoSegmentPlan() {
@@ -98,13 +100,56 @@ describe("render/execute — buildRenderArgs (pure)", () => {
     expect(graph).toContain("xfade=transition=slideleft:duration=0.4:offset=1.6");
   });
 
-  it("rejects a plan with a not-yet-supported node kind (B-roll)", () => {
+  it("overlays a pip B-roll slot with a scaled, PTS-shifted, time-gated overlay", () => {
     let doc = buildTimelineDoc(0, 4);
-    doc = addBroll(doc, { assetId: 9, start: 1, end: 3, mode: "pip" });
+    doc = addBroll(doc, {
+      assetId: 9,
+      start: 1,
+      end: 3,
+      mode: "pip",
+      pip: { x: 0.5, y: 0.25, scale: 0.5 },
+    });
+    const args = buildRenderArgs({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: { "in:main": "/tmp/in.mp4", "in:asset-9": "/tmp/b.mp4" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+    });
+    // The asset is a second ffmpeg input, referenced as [1:v].
+    expect(args.filter((a) => a === "-i")).toHaveLength(2);
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    // Trim to the 2 s window + shift to t=1, scale to 0.5*1080=540 wide, drop at
+    // x=0.5*1080=540, y=0.25*1920=480, gated to 1..3 s.
+    expect(graph).toContain("[1:v]trim=0:2,setpts=PTS-STARTPTS+1/TB,scale=540:-2");
+    expect(graph).toContain("overlay=x=540:y=480:enable='between(t,1,3)'[vout]");
+    // Base reframe now feeds the overlay chain, not the muxer directly.
+    expect(graph).toContain("[vbase]");
+  });
+
+  it("replaces the frame for a full-mode B-roll slot (cover scale + centre crop)", () => {
+    let doc = buildTimelineDoc(0, 4);
+    doc = addBroll(doc, { assetId: 7, start: 0.5, end: 2, mode: "full" });
+    const args = buildRenderArgs({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: { "in:main": "/tmp/in.mp4", "in:asset-7": "/tmp/b.mp4" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+    });
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    expect(graph).toContain(
+      "[1:v]trim=0:1.5,setpts=PTS-STARTPTS+0.5/TB," +
+        "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+    );
+    expect(graph).toContain("overlay=x=0:y=0:enable='between(t,0.5,2)'[vout]");
+  });
+
+  it("rejects a plan with a not-yet-supported node kind (CTA)", () => {
+    let doc = buildTimelineDoc(0, 4);
+    doc = addCta(doc, { start: 1, end: 3, content: "Follow" });
     expect(() =>
       buildRenderArgs({
         plan: renderPlan({ timeline: doc }),
-        inputPaths: { "in:main": "/tmp/in.mp4", "in:asset-9": "/tmp/b.mp4" },
+        inputPaths: { "in:main": "/tmp/in.mp4" },
         outputPath: "/tmp/out.mp4",
         preset: PLATFORM_PRESETS.tiktok,
       }),
@@ -166,6 +211,55 @@ describe("render/execute — executePlan (ffmpeg integration)", () => {
     // shorten by the overlap, so the muxed duration follows).
     expect(info.duration).toBeGreaterThan(3.5 - 0.3);
     expect(info.duration).toBeLessThan(3.5 + 0.3);
+    expect(info.width).toBe(1080);
+    expect(info.height).toBe(1920);
+    expect(info.hasAudio).toBe(true);
+  }, 60_000);
+
+  it("renders a pip B-roll overlay clip; probe OK, duration unchanged", async () => {
+    let doc = buildTimelineDoc(0, 4);
+    doc = addBroll(doc, {
+      assetId: 42,
+      start: 1,
+      end: 3,
+      mode: "pip",
+      pip: { x: 0.6, y: 0.1, scale: 0.3 },
+    });
+    const out = path.join(dir, "broll-pip.mp4");
+    await executePlan({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: { "in:main": SHORT_SAMPLE, "in:asset-42": BROLL_SAMPLE },
+      outputPath: out,
+      preset: PLATFORM_PRESETS.tiktok,
+      quality: "draft",
+    });
+
+    expect(existsSync(out)).toBe(true);
+    const info = await probe(out);
+    // Overlay never lengthens the base → single 4 s segment stays ~4 s.
+    expect(info.duration).toBeGreaterThan(4 - 0.3);
+    expect(info.duration).toBeLessThan(4 + 0.3);
+    expect(info.width).toBe(1080);
+    expect(info.height).toBe(1920);
+    expect(info.hasAudio).toBe(true);
+  }, 60_000);
+
+  it("renders a full-mode B-roll switch; probe OK, duration unchanged", async () => {
+    let doc = buildTimelineDoc(0, 4);
+    doc = addBroll(doc, { assetId: 42, start: 1, end: 3, mode: "full" });
+    const out = path.join(dir, "broll-full.mp4");
+    await executePlan({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: { "in:main": SHORT_SAMPLE, "in:asset-42": BROLL_SAMPLE },
+      outputPath: out,
+      preset: PLATFORM_PRESETS.tiktok,
+      quality: "draft",
+    });
+
+    expect(existsSync(out)).toBe(true);
+    const info = await probe(out);
+    expect(info.duration).toBeGreaterThan(4 - 0.3);
+    expect(info.duration).toBeLessThan(4 + 0.3);
     expect(info.width).toBe(1080);
     expect(info.height).toBe(1920);
     expect(info.hasAudio).toBe(true);

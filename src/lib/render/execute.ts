@@ -7,11 +7,12 @@
  * THIS FILE IS BUILT UP IN CHUNKS (see phase-10 checklist). It renders the
  * video/audio spine of every plan — segment cuts, xfade/slide transitions
  * (mirrored as audio acrossfades so the export shortens by the blend), concat,
- * crop/scale to the platform preset resolution, and the main audio track — and
- * encodes H.264 high + AAC 192k with `+faststart`. Nodes for B-roll, CTA
- * overlays, caption burn-in and SFX are added in later chunks; until then
- * {@link executePlan} rejects a plan containing them with a clear message rather
- * than silently dropping the feature.
+ * crop/scale to the platform preset resolution, B-roll overlays (floating `pip`
+ * box or `full`-frame replacement over the overlay's timeline window), and the
+ * main audio track — and encodes H.264 high + AAC 192k with `+faststart`. Nodes
+ * for CTA overlays, caption burn-in and SFX are added in later chunks; until
+ * then {@link executePlan} rejects a plan containing them with a clear message
+ * rather than silently dropping the feature.
  *
  * All ffmpeg args are assembled as an execa argv array (never a shell string),
  * per the global constraint that every ffmpeg invocation lives in
@@ -23,6 +24,7 @@ import { runFfmpeg } from "../ffmpeg/exec";
 import type { PlatformPreset } from "../presets";
 import type {
   AudioNode,
+  BrollNode,
   ConcatNode,
   CropNode,
   RenderNode,
@@ -56,6 +58,7 @@ const SUPPORTED_KINDS: ReadonlySet<RenderNode["kind"]> = new Set<RenderNode["kin
   "transition",
   "concat",
   "crop",
+  "broll",
   "audio",
 ]);
 
@@ -70,13 +73,73 @@ const XFADE_TRANSITION: Record<TransitionNode["transition"], string> = {
   "slide-right": "slideright",
 };
 
+/** Format a timeline time for a filter expression: integers stay bare, floats
+ * are trimmed to millisecond precision so the graph string stays deterministic
+ * (no `0.30000000000000004` noise from binary floats). */
+function fmtSeconds(t: number): string {
+  return String(Math.round(t * 1000) / 1000);
+}
+
+/** Largest even integer `<= n` (ffmpeg's H.264/yuv420p needs even dimensions). */
+function evenFloor(n: number): number {
+  const i = Math.floor(n);
+  return i - (i % 2);
+}
+
+/**
+ * Filtergraph fragment(s) that overlay one B-roll node onto the reframed video.
+ *
+ * A `pip` slot scales the asset to a box `pip.scale` of the frame wide (height
+ * follows the source aspect ratio) and drops it at the normalised `pip.x`/`pip.y`
+ * corner. A `full` slot scales-to-cover and centre-crops the asset to the whole
+ * frame, replacing the main image while its audio keeps playing (audio is a
+ * separate pipeline). Both trim the asset to the window length and shift its PTS
+ * so it plays from its own start across the window, then gate drawing with
+ * `enable='between(t,start,end)'`. Trimming keeps the overlay stream inside the
+ * base video's span, so overlay (whose output runs as long as its longest input)
+ * never lengthens the export — the duration is unchanged. `assetIdx` is the
+ * ffmpeg `-i` index of the B-roll input.
+ */
+function brollFilter(
+  node: BrollNode,
+  assetIdx: number,
+  i: number,
+  preset: PlatformPreset,
+  inLabel: string,
+  outLabel: string,
+): string[] {
+  const { width: W, height: H } = preset;
+  const enable = `enable='between(t,${fmtSeconds(node.start)},${fmtSeconds(node.end)})'`;
+  // Take the asset's first `window` seconds and re-base its PTS to the window
+  // start, so the overlay stream occupies exactly [start, end] of the timeline.
+  const window = fmtSeconds(Math.max(0, node.end - node.start));
+  const place = `trim=0:${window},setpts=PTS-STARTPTS+${fmtSeconds(node.start)}/TB`;
+  if (node.mode === "full") {
+    const src = `bfull${i}`;
+    return [
+      `[${assetIdx}:v]${place},scale=${W}:${H}:force_original_aspect_ratio=increase,` +
+        `crop=${W}:${H}[${src}]`,
+      `[${inLabel}][${src}]overlay=x=0:y=0:${enable}[${outLabel}]`,
+    ];
+  }
+  const boxW = Math.max(2, evenFloor(node.pip.scale * W));
+  const x = Math.round(node.pip.x * W);
+  const y = Math.round(node.pip.y * H);
+  const src = `bpip${i}`;
+  return [
+    `[${assetIdx}:v]${place},scale=${boxW}:-2[${src}]`,
+    `[${inLabel}][${src}]overlay=x=${x}:y=${y}:${enable}[${outLabel}]`,
+  ];
+}
+
 /** Everything {@link executePlan} needs to render one clip. */
 export interface ExecutePlanInput {
   /** The compiled plan (from {@link renderPlan}). */
   plan: RenderPlan;
   /**
    * Filesystem path for each media input id in `plan.inputs`. Must include
-   * `in:main`; asset inputs are only referenced by nodes this chunk rejects.
+   * `in:main` plus every asset input a supported node references (e.g. each
+   * `in:asset-<id>` used by a B-roll overlay).
    */
   inputPaths: Record<string, string>;
   /** Where to write the encoded MP4 (overwritten if present). */
@@ -178,6 +241,19 @@ export function buildRenderArgs(input: ExecutePlanInput): string[] {
   const mainPath = inputPaths["in:main"];
   if (!mainPath) throw new Error("executePlan: inputPaths must include in:main");
 
+  // ffmpeg `-i` order mirrors plan.inputs (main first), so `[0:*]` is always the
+  // source and each asset gets the next index. Every listed input needs a path;
+  // unsupported nodes already threw above, so at this point only main + the
+  // assets that supported nodes (B-roll) reference remain.
+  const inputIndex = new Map<string, number>();
+  const inputArgs: string[] = [];
+  plan.inputs.forEach((mi, idx) => {
+    const p = inputPaths[mi.id];
+    if (!p) throw new Error(`executePlan: inputPaths missing path for ${mi.id}`);
+    inputIndex.set(mi.id, idx);
+    inputArgs.push("-i", p);
+  });
+
   const segments = segmentNodes(plan);
   if (segments.length === 0) throw new Error("render plan has no segments to render");
 
@@ -239,8 +315,24 @@ export function buildRenderArgs(input: ExecutePlanInput): string[] {
     aSpine = runs[0].a;
   }
 
-  // Reframe to the delivery resolution.
-  parts.push(reframeFilter(findCropNode(plan), preset, vSpine, "vout"));
+  // Reframe to the delivery resolution, then thread the video through the
+  // overlay chain (B-roll now; CTA/captions in later chunks). The last node in
+  // the chain outputs the muxed `vout`; with no overlays the reframe is `vout`.
+  const brolls = plan.nodes.filter((n): n is BrollNode => n.kind === "broll");
+  const reframeOut = brolls.length > 0 ? "vbase" : "vout";
+  parts.push(reframeFilter(findCropNode(plan), preset, vSpine, reframeOut));
+
+  let videoLabel = reframeOut;
+  brolls.forEach((node, i) => {
+    const assetId = node.inputs[1];
+    const assetIdx = inputIndex.get(assetId);
+    if (assetIdx === undefined) {
+      throw new Error(`broll ${node.id} references unknown input ${assetId}`);
+    }
+    const outLabel = i === brolls.length - 1 ? "vout" : `vov${i}`;
+    parts.push(...brollFilter(node, assetIdx, i, preset, videoLabel, outLabel));
+    videoLabel = outLabel;
+  });
 
   // Main audio: apply the clip's volume / mute.
   const audio = findAudioNode(plan);
@@ -249,8 +341,7 @@ export function buildRenderArgs(input: ExecutePlanInput): string[] {
 
   return [
     "-y",
-    "-i",
-    mainPath,
+    ...inputArgs,
     "-filter_complex",
     parts.join(";"),
     "-map",
