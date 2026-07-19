@@ -59,7 +59,7 @@ UI-heavy; keep the timeline STATE pure and tested, the React layer thin.
 - [x] Pure timeline doc model + all ops with invariants
 - [x] Caption re-mapping through edits
 - [x] Timeline strip UI (tracks, trim, split, reorder, zoom, snapping)
-- [ ] Edited-sequence preview playback
+- [x] Edited-sequence preview playback
 - [x] Undo/redo
 - [x] Persistence API (GET/PATCH /api/clips/:id/timeline)
 - [x] Optimistic client save wiring (debounced PATCH from editor — with UI item)

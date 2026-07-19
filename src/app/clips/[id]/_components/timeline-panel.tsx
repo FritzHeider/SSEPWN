@@ -27,6 +27,7 @@ import {
 } from "@/lib/timeline/history";
 import { TimelineStrip } from "./timeline-strip";
 import { remapCaptions } from "@/lib/timeline/captions";
+import { advancePlayback, segmentIndexAt } from "@/lib/timeline/playback";
 import {
   DEFAULT_PX_PER_SEC,
   SNAP_THRESHOLD_PX,
@@ -37,7 +38,13 @@ import {
   xToTime,
   zoomBy,
 } from "@/lib/timeline/strip";
-import { AUDIO_MAX_VOLUME, TimelineError, type TimelineDoc, type TrimEdge } from "@/lib/timeline/types";
+import {
+  AUDIO_MAX_VOLUME,
+  TIME_EPSILON,
+  TimelineError,
+  type TimelineDoc,
+  type TrimEdge,
+} from "@/lib/timeline/types";
 import { sourceVideoUrl } from "@/lib/transcribe/panel";
 
 /** Debounce before the optimistic doc is written back to the server. */
@@ -68,9 +75,10 @@ type Drag = TrimDrag | ReorderDrag;
  * `lib/timeline`, held in an undo stack and debounce-saved through `PATCH
  * /api/clips/:id/timeline` (optimistic UI, durable write-behind). Every
  * pixel↔time conversion and snap comes from `lib/timeline/strip`, so this holds
- * no time arithmetic of its own (a hard Phase-07 constraint). Full edited-
- * sequence playback (auto-skipping deleted ranges) is the separate preview item;
- * here `space` toggles native playback and the playhead maps `video.currentTime`.
+ * no time arithmetic of its own (a hard Phase-07 constraint). Preview plays the
+ * EDITED sequence: `space` starts the single `<video>` from the playhead and each
+ * `timeupdate`/`ended` steps through `advancePlayback`, seeking over deleted ranges
+ * and honouring reordered segments.
  */
 export function TimelinePanel({
   clipId,
@@ -102,6 +110,11 @@ export function TimelinePanel({
   const firstRender = useRef(true);
   const latestDoc = useRef(doc);
   const lastSaved = useRef(initialDoc);
+  // Which segment (playback-order index) edited-sequence preview is currently
+  // playing; `playheadRef` mirrors the playhead so a structural edit can re-seed
+  // the segment without re-running effects on every frame.
+  const playSegRef = useRef(0);
+  const playheadRef = useRef(0);
 
   useEffect(() => {
     alive.current = true;
@@ -109,6 +122,12 @@ export function TimelinePanel({
       alive.current = false;
     };
   }, []);
+
+  // Mirror the playhead into a ref so the doc-change resync effect can read the
+  // latest value without depending on it (which would re-run it every frame).
+  useEffect(() => {
+    playheadRef.current = playhead;
+  }, [playhead]);
 
   const total = totalDuration(view);
   const boxes = useMemo(() => segmentLayout(view, pxPerSec), [view, pxPerSec]);
@@ -186,6 +205,7 @@ export function TimelinePanel({
     (timelineT: number) => {
       const video = videoRef.current;
       setPlayhead(timelineT);
+      playSegRef.current = segmentIndexAt(doc, timelineT);
       if (video) video.currentTime = sourceTimeAt(doc, timelineT);
     },
     [doc],
@@ -196,19 +216,72 @@ export function TimelinePanel({
     if (video) video.currentTime = doc.segments[0]?.sourceIn ?? doc.bounds.in;
   }, [doc]);
 
+  // Edited-sequence preview: while playing, each `timeupdate` steps the single
+  // `<video>` through the segments in playback order, seeking over deleted ranges
+  // and reordered gaps. While paused, just reflect the source clock onto the
+  // playhead (native scrubbing) without yanking out of a deleted region.
   const onTimeUpdate = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+    if (video.paused) {
+      const tl = timelineTimeAt(doc, video.currentTime);
+      if (tl !== null) setPlayhead(tl);
+      return;
+    }
+    const step = advancePlayback(doc, playSegRef.current, video.currentTime);
+    playSegRef.current = step.segIndex;
+    setPlayhead(step.timelineT);
+    if (step.seekSource !== null) video.currentTime = step.seekSource;
+    if (step.ended) video.pause();
+  }, [doc]);
+
+  // The source clock hit the end of the file mid-sequence (the last-played
+  // segment sits at the tail, or the next segment is earlier in source after a
+  // reorder). Advance to the queued segment and keep playing, else stop.
+  const onEnded = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const step = advancePlayback(doc, playSegRef.current, video.currentTime);
+    playSegRef.current = step.segIndex;
+    if (step.seekSource !== null && !step.ended) {
+      video.currentTime = step.seekSource;
+      void video.play();
+    } else {
+      setPlayhead(totalDuration(doc));
+    }
+  }, [doc]);
+
+  // Native transport (the `<video controls>` play button) can start playback
+  // without going through `togglePlay`; re-seed the current segment from wherever
+  // the source clock sits so `advancePlayback` steps from the right place.
+  const onPlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
     const tl = timelineTimeAt(doc, video.currentTime);
-    if (tl !== null) setPlayhead(tl);
+    playSegRef.current = segmentIndexAt(doc, tl ?? playheadRef.current);
   }, [doc]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) void video.play();
-    else video.pause();
-  }, []);
+    if (video.paused) {
+      // (Re)start the edited sequence from the playhead, or from the top if it
+      // is already parked at the end.
+      const startT = playhead >= total - TIME_EPSILON ? 0 : playhead;
+      playSegRef.current = segmentIndexAt(doc, startT);
+      video.currentTime = sourceTimeAt(doc, startT);
+      setPlayhead(startT);
+      void video.play();
+    } else {
+      video.pause();
+    }
+  }, [doc, playhead, total]);
+
+  // Re-seed the current playback segment when a structural edit (split/delete/
+  // reorder/undo) changes the doc, so preview keeps stepping the right segment.
+  useEffect(() => {
+    playSegRef.current = segmentIndexAt(doc, playheadRef.current);
+  }, [doc]);
 
   // Mirror the doc's audio settings onto the single player.
   useEffect(() => {
@@ -392,6 +465,8 @@ export function TimelinePanel({
           preload="metadata"
           onLoadedMetadata={onLoadedMetadata}
           onTimeUpdate={onTimeUpdate}
+          onPlay={onPlay}
+          onEnded={onEnded}
           className="w-full"
         />
       </div>
