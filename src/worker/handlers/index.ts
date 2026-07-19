@@ -2,6 +2,7 @@ import { HumanFaceDetector } from "../../lib/crop/human";
 import type { Job, JobsDb } from "../../lib/jobs";
 import { createGenerateClipsHandler } from "./generate-clips";
 import { createIngestHandler } from "./ingest";
+import { createProbeAssetHandler } from "./probe-asset";
 import { createSmartCropHandler } from "./smart-crop";
 import { createTranscribeHandler } from "./transcribe";
 
@@ -39,4 +40,5 @@ export const handlers: HandlerRegistry = {
   transcribe: createTranscribeHandler(),
   "generate-clips": createGenerateClipsHandler(),
   "smart-crop": createSmartCropHandler({ detector: new HumanFaceDetector() }),
+  "probe-asset": createProbeAssetHandler(),
 };

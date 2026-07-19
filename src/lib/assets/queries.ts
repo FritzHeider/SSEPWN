@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { assets } from "@/lib/db/schema";
+import type { JobsDb } from "@/lib/jobs";
 
 import type { AssetKind } from "./kind";
 
@@ -56,4 +57,31 @@ export function listAssets(filter: ListAssetsFilter = {}): AssetRow[] {
 
 export function getAsset(id: number): AssetRow | undefined {
   return db.select().from(assets).where(eq(assets.id, id)).get();
+}
+
+/** Metadata patch written back by the asset-probe worker job. */
+export interface AssetMetadataPatch {
+  width: number | null;
+  height: number | null;
+  duration: number | null;
+  thumbnailPath: string | null;
+}
+
+/** Fill in probed dimensions/duration/poster for an asset. Returns the row, or undefined if gone. */
+export function updateAssetMetadata(
+  id: number,
+  patch: AssetMetadataPatch,
+  database: JobsDb = db,
+): AssetRow | undefined {
+  return database
+    .update(assets)
+    .set({
+      width: patch.width,
+      height: patch.height,
+      duration: patch.duration,
+      thumbnailPath: patch.thumbnailPath,
+    })
+    .where(eq(assets.id, id))
+    .returning()
+    .get();
 }

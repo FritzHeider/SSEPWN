@@ -72,6 +72,22 @@ if [ -f fixtures/broll-sample.mp4 ]; then skip broll-sample.mp4; else
   made broll-sample.mp4
 fi
 
+# logo-sample.png — 320x240 still image (Phase 08 image/logo/CTA asset probe).
+if [ -f fixtures/logo-sample.png ]; then skip logo-sample.png; else
+  ffmpeg -hide_banner -loglevel error -y \
+    -f lavfi -i "testsrc2=size=320x240:rate=1:duration=1" \
+    -frames:v 1 fixtures/logo-sample.png
+  made logo-sample.png
+fi
+
+# sfx-sample.wav — 2 s mono 44.1 kHz tone (Phase 08 audio/SFX asset probe).
+if [ -f fixtures/sfx-sample.wav ]; then skip sfx-sample.wav; else
+  ffmpeg -hide_banner -loglevel error -y \
+    -f lavfi -i "sine=frequency=660:sample_rate=44100:duration=2" \
+    -ac 1 fixtures/sfx-sample.wav
+  made sfx-sample.wav
+fi
+
 # not-a-video.txt — for probe rejection tests.
 if [ -f fixtures/not-a-video.txt ]; then skip not-a-video.txt; else
   printf 'this is not a video file\n' > fixtures/not-a-video.txt

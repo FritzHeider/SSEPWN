@@ -5,6 +5,8 @@ import { NextResponse } from "next/server";
 
 import { assetAllowedTypesMap, assetKind, fileExtension, isAssetKind } from "@/lib/assets/kind";
 import { insertAsset, listAssets } from "@/lib/assets/queries";
+import { db } from "@/lib/db";
+import { createJobQueue } from "@/lib/jobs";
 import { receiveUpload, UploadError } from "@/lib/upload/receive";
 
 // busboy + node:fs streaming and the db singleton both need Node APIs.
@@ -88,6 +90,16 @@ export async function POST(request: Request) {
       path: upload.filePath,
       originalName: upload.originalName,
     });
+
+    // Probing + thumbnailing is media work, so it runs in the worker, never
+    // here. The `jobs` table scopes every job to a project (NOT NULL + FK), so
+    // an asset can only be auto-probed when it was uploaded against one — which
+    // the editor's picker always does. A library-global asset (no projectId)
+    // simply stays un-probed until it is used in a project context.
+    if (projectId !== null) {
+      createJobQueue(db).enqueue("probe-asset", projectId, { assetId: asset.id });
+    }
+
     return NextResponse.json({ asset }, { status: 201 });
   } catch (error) {
     await unlink(upload.filePath).catch(() => {});
