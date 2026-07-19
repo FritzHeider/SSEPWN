@@ -123,16 +123,24 @@ that would be indistinguishable from a silent video. Likewise, an unrecognised
 `TRANSCRIBER` value is a startup error rather than a silent fallback, so a typo
 cannot quietly reach the real binary.
 
-Only needed to transcribe for real (`npm run worker`):
+Only needed to transcribe for real (`npm run worker`). The short path — both
+land on the defaults, so no env vars needed:
 
 ```bash
-# 1. build whisper.cpp (see https://github.com/ggerganov/whisper.cpp)
+# 1. install the CLI (puts `whisper-cli` on PATH, the default WHISPER_BIN)
+brew install whisper-cpp
+
+# 2. download the default model (~141 MB) to models/ggml-base.en.bin — the
+#    default WHISPER_MODEL path, gitignored. WHISPER_MODELS=1 (plural) is the
+#    download flag; singular WHISPER_MODEL is the model *path*.
+WHISPER_MODELS=1 npm run fixtures
+```
+
+Or build from source and point the env vars at the results:
+
+```bash
 git clone https://github.com/ggerganov/whisper.cpp && cd whisper.cpp && cmake -B build && cmake --build build -j
-
-# 2. download a model — base.en is a good speed/quality default
 sh ./models/download-ggml-model.sh base.en
-
-# 3. point Sseclone at both (models/ and *.bin are gitignored)
 export WHISPER_BIN=/path/to/whisper.cpp/build/bin/whisper-cli
 export WHISPER_MODEL=/path/to/whisper.cpp/models/ggml-base.en.bin
 ```
@@ -208,7 +216,7 @@ ffmpeg test pattern with no faces in it.
 |---|---|---|
 | `npm run fixtures` or a job fails with `ffmpeg`/`ffprobe` **ENOENT** / `spawn ffmpeg` | FFmpeg not on PATH | Install it and reopen the shell: `brew install ffmpeg` (macOS) / `apt-get install ffmpeg` (Debian/Ubuntu). Verify with `ffmpeg -version` and `ffprobe -version`. |
 | Burn-in / captions integration test **skipped** | ffmpeg built without libass (`ass` filter absent) | Optional — install an ffmpeg with libass (`brew install ffmpeg` ships it). Exports still succeed; caption burn-in is dropped and the mp4 is produced without baked captions. |
-| A transcribe job fails naming `WHISPER_BIN`/`WHISPER_MODEL` | Real whisper selected but binary or model missing | Build whisper.cpp and download a model (see [Transcription](#transcription)), then set `WHISPER_BIN` and `WHISPER_MODEL`. For local dev without whisper, set `TRANSCRIBER=fake`. |
+| A transcribe job fails naming `WHISPER_BIN`/`WHISPER_MODEL` | Real whisper selected but binary or model missing | `brew install whisper-cpp` and `WHISPER_MODELS=1 npm run fixtures` (see [Transcription](#transcription)); only set `WHISPER_BIN`/`WHISPER_MODEL` for non-default locations. For local dev without whisper, set `TRANSCRIBER=fake`. |
 | `TRANSCRIBER` startup error `unknown transcriber` | Typo in the env var | Use `fake` or `whisper` — an unrecognised value is rejected on purpose so a typo never silently reaches the real binary. |
 | A smart-crop job fails naming `@vladmandic/human` or `HUMAN_MODELS_PATH` | Real detector selected but package or models missing | `CROP_MODELS=1 npm run fixtures` to fetch the models, then `npm install @vladmandic/human @tensorflow/tfjs-node` (see [Smart crop](#smart-crop)). Both are opt-in; unit tests use `FakeDetector` and need neither. |
 | `npm test` cannot find the transcript for an uploaded file | Project name doesn't match a fixture transcript | The fake transcriber replays `tests/samples/transcripts/<name>.json` by project name; upload `long-sample.mp4` / `short-sample.mp4`, or add a matching JSON. |

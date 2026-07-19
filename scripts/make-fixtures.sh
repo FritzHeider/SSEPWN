@@ -123,3 +123,31 @@ if [ "${CROP_MODELS:-}" = "1" ]; then
   done
   echo "human face models ready in models/human/ (~2 MB)"
 fi
+
+# --- Optional: whisper.cpp ggml model (transcription) ------------------------
+# OPT-IN via WHISPER_MODELS=1 — off by default for the same reason as
+# CROP_MODELS: the default suite uses the fake transcriber and needs no model,
+# and this one is ~141 MB. NOT named WHISPER_MODEL=1 — that variable is already
+# the model *path* read by src/lib/transcribe/whisper.ts. Downloads the default
+# model that path points at (models/ggml-base.en.bin, gitignored). Enable real
+# transcription with:
+#   WHISPER_MODELS=1 npm run fixtures   # download the model once
+#   brew install whisper-cpp            # or build whisper.cpp; see README
+#   WHISPER_SMOKE=1 npm test            # opt-in smoke test
+if [ "${WHISPER_MODELS:-}" = "1" ]; then
+  command -v curl >/dev/null 2>&1 || {
+    echo "error: curl not found on PATH (needed for WHISPER_MODELS=1)" >&2
+    exit 1
+  }
+  whisper_model="models/ggml-base.en.bin"
+  if [ -f "$whisper_model" ]; then
+    echo "skip: $whisper_model already exists"
+  else
+    mkdir -p models
+    echo "downloading $whisper_model (~141 MB) ..."
+    curl -fSL "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin" \
+      -o "$whisper_model"
+    echo "made: $whisper_model"
+  fi
+  echo "whisper model ready at $whisper_model"
+fi
