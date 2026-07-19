@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "worker": "tsx src/worker/index.ts",
     "fixtures": "bash scripts/make-fixtures.sh",
     "db:migrate": "mkdir -p data && drizzle-kit migrate && tsx scripts/seed-builtins.ts"
