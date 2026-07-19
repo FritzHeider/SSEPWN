@@ -18,7 +18,7 @@
     "test:e2e": "playwright test",
     "worker": "tsx src/worker/index.ts",
     "fixtures": "bash scripts/make-fixtures.sh",
-    "db:migrate": "mkdir -p data && drizzle-kit migrate"
+    "db:migrate": "mkdir -p data && drizzle-kit migrate && tsx scripts/seed-builtins.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",

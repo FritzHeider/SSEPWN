@@ -50,6 +50,13 @@
       "when": 1784420800000,
       "tag": "0006_add_asset_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1784443498189,
+      "tag": "0007_add_templates",
+      "breakpoints": true
     }
   ]
 }

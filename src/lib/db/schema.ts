@@ -142,6 +142,36 @@ export const clipEdits = sqliteTable("clip_edits", {
     .default(sql`(unixepoch())`),
 });
 
+export const templates = sqliteTable("templates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /**
+   * Stable slug for a built-in template (unique), used to seed the three
+   * shipped templates idempotently. Null for user-saved templates — SQLite
+   * allows many NULLs under a UNIQUE index, so saved templates never collide.
+   */
+  key: text("key").unique(),
+  name: text("name").notNull(),
+  /** True for the three shipped templates; they are undeletable in the UI. */
+  builtin: integer("builtin", { mode: "boolean" }).notNull().default(false),
+  /** Caption preset name (bold-pop | clean-sub | minimal-caps | boxed). */
+  captionPreset: text("caption_preset").notNull(),
+  /** Complete CaptionStyle as JSON, so a save→apply round-trip is exact. */
+  captionStyle: text("caption_style").notNull(),
+  /** Reframe target (9:16 | 1:1 | 16:9). */
+  aspectRatio: text("aspect_ratio").notNull(),
+  /** CTA entries as a JSON array (TemplateCta[]). */
+  ctas: text("ctas").notNull().default("[]"),
+  /** Brand primary #RRGGBB — drives caption highlight. */
+  brandPrimary: text("brand_primary").notNull(),
+  /** Brand secondary #RRGGBB — drives CTA background. */
+  brandSecondary: text("brand_secondary").notNull(),
+  /** Optional watermark image asset id. */
+  watermarkAssetId: integer("watermark_asset_id").references(() => assets.id),
+  createdAt: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
 export const exports = sqliteTable("exports", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   clipId: integer("clip_id")
