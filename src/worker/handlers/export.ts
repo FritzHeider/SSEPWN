@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 
 import { toAss } from "../../lib/captions/ass";
 import { exports } from "../../lib/db/schema";
+import { ffmpegHasFilter } from "../../lib/ffmpeg/exec";
 import { resolvePlatformPreset } from "../../lib/presets";
 import {
   executePlan,
@@ -81,11 +82,26 @@ export function createExportHandler(): JobHandler {
       .run();
 
     const preset = resolvePlatformPreset(row.preset);
-    const { plan, inputPaths, captions } = compileClipRender(db, row.clipId);
+    const compiled = compileClipRender(db, row.clipId);
+    let plan = compiled.plan;
+    const { inputPaths, captions } = compiled;
 
     const dir = resolveExportDir();
     mkdirSync(dir, { recursive: true });
     const outputPath = exportOutputPath(dir, row.clipId, row.preset);
+
+    // Caption burn-in needs libass (the `ass` filter). On an ffmpeg built without
+    // it the burn cannot run, and forcing the filter would fail the whole export.
+    // Degrade gracefully instead: drop the captions node so the clip still renders
+    // (without burned captions) rather than producing nothing. A build WITH libass
+    // is unaffected. (Real whisper/Human are opt-in; a plain ffmpeg is the floor
+    // the pipeline must survive — Phase-11 hardening.)
+    if (plan.nodes.some((n) => n.kind === "captions") && !(await ffmpegHasFilter("ass"))) {
+      console.warn(
+        `[export] ffmpeg has no 'ass' filter (libass) — rendering clip ${row.clipId} without burned captions`,
+      );
+      plan = { ...plan, nodes: plan.nodes.filter((n) => n.kind !== "captions") };
+    }
 
     // Captions burn from an ASS file rendered at the preset's resolution. The
     // plan carries only the cue count + style name, so the doc must be written

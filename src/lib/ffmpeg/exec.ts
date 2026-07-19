@@ -103,6 +103,38 @@ export function runFfmpeg(args: string[]): Promise<Result> {
   return execa("ffmpeg", args);
 }
 
+let filterNamesCache: Promise<Set<string>> | null = null;
+
+/**
+ * Names of the filters this ffmpeg build ships. Probed once (`ffmpeg -filters`)
+ * and cached for the process. On any failure it resolves to an empty set — an
+ * unknown build is treated as "has nothing", so a caller degrades gracefully
+ * rather than assuming a filter is present.
+ */
+export function ffmpegFilterNames(): Promise<Set<string>> {
+  if (!filterNamesCache) {
+    filterNamesCache = execa("ffmpeg", ["-hide_banner", "-filters"])
+      .then(({ stdout }) => {
+        const names = new Set<string>();
+        for (const line of stdout.split("\n")) {
+          // Each filter row is ` .. name  in->out  desc`: a 2–3 char flags column
+          // (T/S/C or dots), the name, then an `X->Y` stream-type arrow. Header and
+          // legend lines don't match this shape.
+          const match = /^\s*[TSC.]{2,3}\s+(\S+)\s+\S+->\S+/.exec(line);
+          if (match) names.add(match[1]);
+        }
+        return names;
+      })
+      .catch(() => new Set<string>());
+  }
+  return filterNamesCache;
+}
+
+/** Whether this ffmpeg build exposes a given filter (e.g. `ass`, `drawtext`). */
+export async function ffmpegHasFilter(name: string): Promise<boolean> {
+  return (await ffmpegFilterNames()).has(name);
+}
+
 function parseFps(rate: string | undefined): number {
   if (!rate) return 0;
   const [num, den] = rate.split("/").map(Number);

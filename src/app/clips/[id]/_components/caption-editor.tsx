@@ -289,6 +289,9 @@ export function CaptionEditor({
                       ) : (
                         <button
                           type="button"
+                          data-testid="caption-word"
+                          data-line={index}
+                          data-word={wi}
                           onClick={() => beginEdit(index, wi, w.text)}
                           className={`rounded px-1 py-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
                             index === activeLine && activeWordIndex(line, relTime) === wi

@@ -65,7 +65,7 @@ the whole product coherent and prove the full journey works.
 - [x] Auto pipeline chain + retry-from-failed-step
 - [x] Edge-state clipping (no-transcript scene/energy fallback + very-short whole-video clip + no-audio enqueues generate-clips)
 - [x] Edge-state UI (captions-disabled explanation + zero-highlight manual-clip offer)
-- [ ] Full-journey Playwright test green
+- [x] Full-journey Playwright test green
 - [x] Validation + error shape + worker crash recovery (zod body validation + centralized { error, code } shape; crash recovery done)
 - [x] Concurrent-upload test green
 - [ ] Cascade delete + no orphans

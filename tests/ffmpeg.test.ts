@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parseFfmpegProgress, probe } from "../src/lib/ffmpeg/exec";
+import { ffmpegFilterNames, ffmpegHasFilter, parseFfmpegProgress, probe } from "../src/lib/ffmpeg/exec";
 
 const SHORT_SAMPLE = "fixtures/short-sample.mp4";
 const NO_AUDIO = "fixtures/no-audio.mp4";
@@ -68,5 +68,21 @@ describe("parseFfmpegProgress", () => {
 
   it("floors at 0 for a zero time", () => {
     expect(parseFfmpegProgress("out_time_us=0\n", 4)).toBe(0);
+  });
+});
+
+describe("ffmpeg filter capability", () => {
+  it("lists this build's filters and reports staples as present", async () => {
+    const names = await ffmpegFilterNames();
+    expect(names.size).toBeGreaterThan(0);
+    // `scale` and `crop` ship in every ffmpeg build; the export's reframe relies
+    // on them, so their presence is a safe invariant.
+    expect(names.has("scale")).toBe(true);
+    expect(names.has("crop")).toBe(true);
+  });
+
+  it("reports a nonexistent filter as absent (so callers can degrade)", async () => {
+    expect(await ffmpegHasFilter("scale")).toBe(true);
+    expect(await ffmpegHasFilter("definitely-not-a-real-filter")).toBe(false);
   });
 });
