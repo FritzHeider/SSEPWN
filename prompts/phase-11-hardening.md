@@ -67,7 +67,7 @@ the whole product coherent and prove the full journey works.
 - [x] Edge-state UI (captions-disabled explanation + zero-highlight manual-clip offer)
 - [ ] Full-journey Playwright test green
 - [x] Validation + error shape + worker crash recovery (zod body validation + centralized { error, code } shape; crash recovery done)
-- [ ] Concurrent-upload test green
+- [x] Concurrent-upload test green
 - [ ] Cascade delete + no orphans
 - [ ] README verified in clean clone
 - [ ] All acceptance criteria verified in one iteration
