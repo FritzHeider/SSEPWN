@@ -1,11 +1,14 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { toAss, type CaptionDoc } from "../src/lib/captions/ass";
+import type { CaptionCue } from "../src/lib/captions/clip";
+import { getPreset } from "../src/lib/captions/style";
 import { probe, probeFaststart } from "../src/lib/ffmpeg/exec";
 import {
   buildRenderArgs,
@@ -42,6 +45,90 @@ async function drawtextAvailable(): Promise<boolean> {
 }
 
 const DRAWTEXT_AVAILABLE = await drawtextAvailable();
+
+/**
+ * Whether the local ffmpeg was built with the `ass` filter (libass). Caption
+ * burn-in rasterises via `ass`; minimal builds omit it, and `npm test` must stay
+ * green there, so the real pixel-diff burn assertion is gated on this probe
+ * (mirrors {@link drawtextAvailable} and the phase-05 `ass` gate — DEC-010/DEC-013).
+ */
+async function assFilterAvailable(): Promise<boolean> {
+  try {
+    const { stdout } = await execa("ffmpeg", ["-hide_banner", "-filters"]);
+    return stdout.split("\n").some((line) => line.trim().split(/\s+/)[1] === "ass");
+  } catch {
+    return false;
+  }
+}
+
+const ASS_AVAILABLE = await assFilterAvailable();
+
+/** A caption doc with one 2-line cue spanning ~0.5–2.8 s, for burn-in tests. */
+function captionDoc(): CaptionDoc {
+  const cue: CaptionCue = {
+    lines: [
+      {
+        words: [
+          { text: "hello", start: 0.5, end: 1.0 },
+          { text: "there", start: 1.0, end: 1.6 },
+        ],
+        text: "hello there",
+        start: 0.5,
+        end: 1.6,
+      },
+      {
+        words: [
+          { text: "brave", start: 1.6, end: 2.2 },
+          { text: "world", start: 2.2, end: 2.8 },
+        ],
+        text: "brave world",
+        start: 1.6,
+        end: 2.8,
+      },
+    ],
+    start: 0.5,
+    end: 2.8,
+  };
+  return { cues: [cue], style: getPreset("bold-pop"), name: "bold-pop" };
+}
+
+/**
+ * Extract one RGB24 frame at `t` seconds from `file` as a raw pixel buffer (no
+ * PNG compression) so two renders can be compared pixel-for-pixel. Returns the
+ * decoded `width*height*3` bytes.
+ */
+async function rawFrame(file: string, t: number): Promise<Buffer> {
+  const { stdout } = await execa(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-ss",
+      String(t),
+      "-i",
+      file,
+      "-frames:v",
+      "1",
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgb24",
+      "-",
+    ],
+    { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 },
+  );
+  return Buffer.from(stdout);
+}
+
+/** Mean absolute per-byte difference between two equal-length RGB frames (0–255). */
+function meanAbsDiff(a: Buffer, b: Buffer): number {
+  const n = Math.min(a.length, b.length);
+  if (n === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += Math.abs(a[i] - b[i]);
+  return sum / n;
+}
 
 /** A 4 s clip cut into two 2 s segments joined by a plain cut. */
 function twoSegmentPlan() {
@@ -238,6 +325,66 @@ describe("render/execute — buildRenderArgs (pure)", () => {
     expect(graph).toContain("[vbase][bpip0]overlay=x=540:y=960:enable='between(t,1,3)'[vov0]");
     expect(graph).toContain("[vov0]drawtext=");
     expect(graph).toContain("[vout]");
+  });
+
+  it("burns captions last in the video chain via the ass filter", () => {
+    const doc = buildTimelineDoc(0, 4);
+    const assPath = "/tmp/captions.ass";
+    const args = buildRenderArgs({
+      plan: renderPlan({ timeline: doc, captions: captionDoc() }),
+      inputPaths: { "in:main": "/tmp/in.mp4" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+      captionsAssPath: assPath,
+    });
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    // Reframe feeds the caption burn, which outputs the muxed vout.
+    expect(graph).toContain("[vbase]");
+    expect(graph).toContain(`ass=${assPath}[vout]`);
+  });
+
+  it("layers B-roll and a CTA under the caption burn (broll → cta → captions)", () => {
+    let doc = buildTimelineDoc(0, 4);
+    doc = addBroll(doc, { assetId: 9, start: 1, end: 3, mode: "pip", pip: { x: 0.5, y: 0.5, scale: 0.4 } });
+    doc = addCta(doc, { variant: "text", content: "Hi", start: 1, end: 3 });
+    const args = buildRenderArgs({
+      plan: renderPlan({ timeline: doc, captions: captionDoc() }),
+      inputPaths: { "in:main": "/tmp/in.mp4", "in:asset-9": "/tmp/b.mp4" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+      captionsAssPath: "/tmp/c.ass",
+    });
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    // B-roll (vov0) → CTA (vov1) → captions (vout): captions closes the chain.
+    expect(graph).toContain("[vbase][bpip0]");
+    expect(graph).toContain("[vov0]drawtext=");
+    expect(graph).toContain("[vov1]ass=/tmp/c.ass[vout]");
+  });
+
+  it("rejects a captions plan when no captionsAssPath is provided", () => {
+    const doc = buildTimelineDoc(0, 4);
+    expect(() =>
+      buildRenderArgs({
+        plan: renderPlan({ timeline: doc, captions: captionDoc() }),
+        inputPaths: { "in:main": "/tmp/in.mp4" },
+        outputPath: "/tmp/out.mp4",
+        preset: PLATFORM_PRESETS.tiktok,
+      }),
+    ).toThrow(/captionsAssPath/);
+  });
+
+  it("escapes filtergraph meta-characters in the ass path", () => {
+    const doc = buildTimelineDoc(0, 4);
+    const args = buildRenderArgs({
+      plan: renderPlan({ timeline: doc, captions: captionDoc() }),
+      inputPaths: { "in:main": "/tmp/in.mp4" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+      captionsAssPath: "/tmp/o'brien.ass",
+    });
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    // Single quote escaped so it can't close the filter-option value.
+    expect(graph).toContain("ass=/tmp/o\\'brien.ass[vout]");
   });
 
   it("rejects a plan with a not-yet-supported node kind (SFX)", () => {
@@ -443,6 +590,63 @@ describe("render/execute — executePlan (ffmpeg integration)", () => {
     "text CTA burn skipped: this ffmpeg build lacks the `drawtext` filter (libfreetype)",
     () => {
       expect(DRAWTEXT_AVAILABLE).toBe(false);
+    },
+  );
+
+  // Real caption burn — gated on a libass ffmpeg build (DEC-010/DEC-013). Proves
+  // burn-in happened by pixel-diffing a frame taken during a caption line against
+  // the same frame of a captionless render of the identical timeline.
+  it.runIf(ASS_AVAILABLE)(
+    "burns captions: a frame during a caption line differs from the captionless render",
+    async () => {
+      const doc = buildTimelineDoc(0, 4);
+      const source = await probe(SHORT_SAMPLE);
+
+      // Captionless render (no captions node → no ass path needed).
+      const plain = path.join(dir, "plain.mp4");
+      await executePlan({
+        plan: renderPlan({ timeline: doc }),
+        inputPaths: { "in:main": SHORT_SAMPLE },
+        outputPath: plain,
+        preset: PLATFORM_PRESETS.tiktok,
+        quality: "draft",
+      });
+
+      // Captioned render of the same timeline, burning the ASS built at preset res.
+      const assPath = path.join(dir, "captions.ass");
+      await writeFile(assPath, toAss(captionDoc(), source.width, source.height), "utf8");
+      const captioned = path.join(dir, "captioned.mp4");
+      await executePlan({
+        plan: renderPlan({ timeline: doc, captions: captionDoc() }),
+        inputPaths: { "in:main": SHORT_SAMPLE },
+        outputPath: captioned,
+        preset: PLATFORM_PRESETS.tiktok,
+        quality: "draft",
+        captionsAssPath: assPath,
+      });
+
+      expect(existsSync(captioned)).toBe(true);
+      const info = await probe(captioned);
+      expect(info.width).toBe(1080);
+      expect(info.height).toBe(1920);
+      // Burn-in must not change the duration.
+      expect(info.duration).toBeGreaterThan(4 - 0.3);
+      expect(info.duration).toBeLessThan(4 + 0.3);
+
+      // t = 1.0 s is inside the caption's 0.5–2.8 s span → the burned frame must
+      // differ measurably from the captionless one; a captionless-vs-captionless
+      // baseline stays near zero, so the caption is what moved the pixels.
+      const plainFrame = await rawFrame(plain, 1.0);
+      const captionedFrame = await rawFrame(captioned, 1.0);
+      expect(meanAbsDiff(plainFrame, captionedFrame)).toBeGreaterThan(1);
+    },
+    120_000,
+  );
+
+  it.skipIf(ASS_AVAILABLE)(
+    "caption burn skipped: this ffmpeg build lacks the `ass` filter (libass)",
+    () => {
+      expect(ASS_AVAILABLE).toBe(false);
     },
   );
 });

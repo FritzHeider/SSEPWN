@@ -8,11 +8,12 @@
  * video/audio spine of every plan — segment cuts, xfade/slide transitions
  * (mirrored as audio acrossfades so the export shortens by the blend), concat,
  * crop/scale to the platform preset resolution, B-roll overlays (floating `pip`
- * box or `full`-frame replacement over the overlay's timeline window), and the
- * main audio track — and encodes H.264 high + AAC 192k with `+faststart`. Nodes
- * for CTA overlays, caption burn-in and SFX are added in later chunks; until
- * then {@link executePlan} rejects a plan containing them with a clear message
- * rather than silently dropping the feature.
+ * box or `full`-frame replacement over the overlay's timeline window), CTA cards
+ * (drawtext / image with fades), caption burn-in (the `ass` filter, last in the
+ * video chain), and the main audio track — and encodes H.264 high + AAC 192k with
+ * `+faststart`. Nodes for SFX/audio mixing are added in a later chunk; until then
+ * {@link executePlan} rejects a plan containing them with a clear message rather
+ * than silently dropping the feature.
  *
  * All ffmpeg args are assembled as an execa argv array (never a shell string),
  * per the global constraint that every ffmpeg invocation lives in
@@ -20,11 +21,13 @@
  */
 
 import { cropFilter } from "../crop/filter";
+import { escapeFilterPath } from "../ffmpeg/burn";
 import { runFfmpeg } from "../ffmpeg/exec";
 import type { PlatformPreset } from "../presets";
 import type {
   AudioNode,
   BrollNode,
+  CaptionsNode,
   ConcatNode,
   CropNode,
   CtaNode,
@@ -61,6 +64,7 @@ const SUPPORTED_KINDS: ReadonlySet<RenderNode["kind"]> = new Set<RenderNode["kin
   "crop",
   "broll",
   "cta",
+  "captions",
   "audio",
 ]);
 
@@ -328,6 +332,20 @@ function ctaFilter(
   return ctaTextFilter(node, preset, inLabel, outLabel);
 }
 
+/**
+ * Filtergraph fragment that burns the clip's caption track over the video via the
+ * `ass` filter (libass) — the same filter as the phase-05 {@link burnIn}, so the
+ * karaoke sweeps / outline / box the `toAss` document encodes render identically.
+ * Captions burn LAST (over B-roll and CTAs), per plan order. The ASS file is a
+ * derived artifact the caller writes (from the plan's caption doc at the preset's
+ * resolution) and hands in as {@link ExecutePlanInput.captionsAssPath}; the path is
+ * escaped so colons/quotes survive the filtergraph parser. (Requires an ffmpeg
+ * built with libass; the burn is capability-gated, see DEC-010/DEC-013.)
+ */
+function captionsFilter(assPath: string, inLabel: string, outLabel: string): string[] {
+  return [`[${inLabel}]ass=${escapeFilterPath(assPath)}[${outLabel}]`];
+}
+
 /** Everything {@link executePlan} needs to render one clip. */
 export interface ExecutePlanInput {
   /** The compiled plan (from {@link renderPlan}). */
@@ -342,6 +360,13 @@ export interface ExecutePlanInput {
   outputPath: string;
   /** Delivery preset — supplies the exact output resolution. */
   preset: PlatformPreset;
+  /**
+   * Path to the ASS subtitle file to burn in, required iff the plan contains a
+   * `captions` node. The caller renders it from the clip's caption doc with
+   * {@link toAss} at the preset's resolution and writes it to disk; the executor
+   * feeds the path to the `ass` filter. Ignored when the plan has no captions.
+   */
+  captionsAssPath?: string;
   /** Encoding tier; defaults to `final`. */
   quality?: RenderQuality;
   /** Coarse progress callback (0–100). Detailed `-progress` parsing lands in a
@@ -518,30 +543,43 @@ export function buildRenderArgs(input: ExecutePlanInput): string[] {
   }
 
   // Reframe to the delivery resolution, then thread the video through the overlay
-  // chain in plan order: B-roll (under), then CTA (over). Captions burn last in a
-  // later chunk. The last overlay outputs the muxed `vout`; with no overlays the
-  // reframe is `vout` directly.
+  // chain in plan order: B-roll (under), then CTA (over), then caption burn-in
+  // (last, on top of everything). The last step outputs the muxed `vout`; with no
+  // steps the reframe is `vout` directly.
   const brolls = plan.nodes.filter((n): n is BrollNode => n.kind === "broll");
   const ctas = plan.nodes.filter((n): n is CtaNode => n.kind === "cta");
-  const overlays: Array<{ kind: "broll"; node: BrollNode } | { kind: "cta"; node: CtaNode }> = [
+  const captionsNode = plan.nodes.find((n): n is CaptionsNode => n.kind === "captions");
+  const steps: Array<
+    | { kind: "broll"; node: BrollNode }
+    | { kind: "cta"; node: CtaNode }
+    | { kind: "captions"; node: CaptionsNode }
+  > = [
     ...brolls.map((node) => ({ kind: "broll" as const, node })),
     ...ctas.map((node) => ({ kind: "cta" as const, node })),
   ];
-  const reframeOut = overlays.length > 0 ? "vbase" : "vout";
+  if (captionsNode) steps.push({ kind: "captions", node: captionsNode });
+  const reframeOut = steps.length > 0 ? "vbase" : "vout";
   parts.push(reframeFilter(findCropNode(plan), preset, vSpine, reframeOut));
 
   let videoLabel = reframeOut;
-  overlays.forEach((ov, i) => {
-    const outLabel = i === overlays.length - 1 ? "vout" : `vov${i}`;
-    if (ov.kind === "broll") {
-      const assetId = ov.node.inputs[1];
+  steps.forEach((step, i) => {
+    const outLabel = i === steps.length - 1 ? "vout" : `vov${i}`;
+    if (step.kind === "broll") {
+      const assetId = step.node.inputs[1];
       const assetIdx = inputIndex.get(assetId);
       if (assetIdx === undefined) {
-        throw new Error(`broll ${ov.node.id} references unknown input ${assetId}`);
+        throw new Error(`broll ${step.node.id} references unknown input ${assetId}`);
       }
-      parts.push(...brollFilter(ov.node, assetIdx, i, preset, videoLabel, outLabel));
+      parts.push(...brollFilter(step.node, assetIdx, i, preset, videoLabel, outLabel));
+    } else if (step.kind === "cta") {
+      parts.push(...ctaFilter(step.node, inputIndex, i, preset, videoLabel, outLabel));
     } else {
-      parts.push(...ctaFilter(ov.node, inputIndex, i, preset, videoLabel, outLabel));
+      if (!input.captionsAssPath) {
+        throw new Error(
+          "executePlan: plan has a captions node but no captionsAssPath was provided",
+        );
+      }
+      parts.push(...captionsFilter(input.captionsAssPath, videoLabel, outLabel));
     }
     videoLabel = outLabel;
   });
