@@ -4,13 +4,14 @@
  * ordered filter-graph plan into a concrete ffmpeg invocation and runs it,
  * producing the platform-ready MP4.
  *
- * THIS FILE IS BUILT UP IN CHUNKS (see phase-10 checklist). This first chunk
- * renders the BASE video/audio spine of every plan — segment cuts, concat,
+ * THIS FILE IS BUILT UP IN CHUNKS (see phase-10 checklist). It renders the
+ * video/audio spine of every plan — segment cuts, xfade/slide transitions
+ * (mirrored as audio acrossfades so the export shortens by the blend), concat,
  * crop/scale to the platform preset resolution, and the main audio track — and
- * encodes H.264 high + AAC 192k with `+faststart`. Nodes for transitions,
- * B-roll, CTA overlays, caption burn-in and SFX are added in later chunks; until
- * then {@link executePlan} rejects a plan containing them with a clear message
- * rather than silently dropping the feature.
+ * encodes H.264 high + AAC 192k with `+faststart`. Nodes for B-roll, CTA
+ * overlays, caption burn-in and SFX are added in later chunks; until then
+ * {@link executePlan} rejects a plan containing them with a clear message rather
+ * than silently dropping the feature.
  *
  * All ffmpeg args are assembled as an execa argv array (never a shell string),
  * per the global constraint that every ffmpeg invocation lives in
@@ -20,7 +21,15 @@
 import { cropFilter } from "../crop/filter";
 import { runFfmpeg } from "../ffmpeg/exec";
 import type { PlatformPreset } from "../presets";
-import type { AudioNode, CropNode, RenderNode, RenderPlan, SegmentNode } from "./plan";
+import type {
+  AudioNode,
+  ConcatNode,
+  CropNode,
+  RenderNode,
+  RenderPlan,
+  SegmentNode,
+  TransitionNode,
+} from "./plan";
 
 /** Encoding quality tiers (phase-10). Output RESOLUTION is always the platform
  * preset's — quality only trades encode speed/size for fidelity (see DEC-012). */
@@ -44,10 +53,22 @@ export const RENDER_QUALITY: Record<RenderQuality, RenderQualitySettings> = {
  * kind is rejected (later phase-10 chunks widen this set). */
 const SUPPORTED_KINDS: ReadonlySet<RenderNode["kind"]> = new Set<RenderNode["kind"]>([
   "segment",
+  "transition",
   "concat",
   "crop",
   "audio",
 ]);
+
+/**
+ * ffmpeg `xfade` transition name for each animated {@link TransitionNode.transition}
+ * kind. `crossfade` dissolves; `slide-left`/`slide-right` push the outgoing frame
+ * off-screen. (`cut` is never a node — plain cuts are stitched by concat.)
+ */
+const XFADE_TRANSITION: Record<TransitionNode["transition"], string> = {
+  crossfade: "fade",
+  "slide-left": "slideleft",
+  "slide-right": "slideright",
+};
 
 /** Everything {@link executePlan} needs to render one clip. */
 export interface ExecutePlanInput {
@@ -91,6 +112,27 @@ function findAudioNode(plan: RenderPlan): AudioNode {
 
 function findCropNode(plan: RenderPlan): CropNode | undefined {
   return plan.nodes.find((n): n is CropNode => n.kind === "crop");
+}
+
+function findConcatNode(plan: RenderPlan): ConcatNode {
+  const concat = plan.nodes.find((n): n is ConcatNode => n.kind === "concat");
+  if (!concat) throw new Error("render plan has no concat node");
+  return concat;
+}
+
+/**
+ * The rendered video+audio stream a plan node produces, plus its running length.
+ * A segment carries its trimmed source window; a transition carries the xfade of
+ * its two inputs. Durations chain through a run so each xfade/acrossfade lands at
+ * the right offset regardless of where the run sits on the edited timeline.
+ */
+interface StreamInfo {
+  /** Bare filtergraph label for this node's video stream (no brackets). */
+  v: string;
+  /** Bare filtergraph label for this node's audio stream (no brackets). */
+  a: string;
+  /** Duration in seconds of the stream this node emits. */
+  dur: number;
 }
 
 /**
@@ -140,8 +182,9 @@ export function buildRenderArgs(input: ExecutePlanInput): string[] {
   if (segments.length === 0) throw new Error("render plan has no segments to render");
 
   const parts: string[] = [];
-  const vLabels: string[] = [];
-  const aLabels: string[] = [];
+  // Rendered stream per plan node id — segments trim the source; transitions
+  // xfade/acrossfade the streams before them, chaining durations along the run.
+  const streams = new Map<string, StreamInfo>();
 
   // Trim each segment to its source window and reset timestamps.
   segments.forEach((seg, i) => {
@@ -151,22 +194,58 @@ export function buildRenderArgs(input: ExecutePlanInput): string[] {
     parts.push(
       `[0:a]atrim=start=${seg.sourceIn}:end=${seg.sourceOut},asetpts=PTS-STARTPTS[a${i}]`,
     );
-    vLabels.push(`[v${i}]`);
-    aLabels.push(`[a${i}]`);
+    streams.set(seg.id, { v: `v${i}`, a: `a${i}`, dur: seg.sourceOut - seg.sourceIn });
   });
 
-  // Concatenate the cut segments into the edited spine (transitions come later).
-  const n = segments.length;
-  parts.push(`${vLabels.join("")}concat=n=${n}:v=1:a=0[vcat]`);
-  parts.push(`${aLabels.join("")}concat=n=${n}:v=0:a=1[acat]`);
+  // Blend transitioned boundaries: xfade the video and acrossfade the audio,
+  // each shortening its run by the transition duration. The xfade offset is the
+  // left stream's accumulated length minus the blend, so chained transitions in
+  // one run land correctly (plan nodes are already in dependency order).
+  const transitions = plan.nodes.filter((n): n is TransitionNode => n.kind === "transition");
+  transitions.forEach((xf, k) => {
+    const left = streams.get(xf.inputs[0]);
+    const right = streams.get(xf.inputs[1]);
+    if (!left || !right) throw new Error(`transition ${xf.id} references an unbuilt stream`);
+    const name = XFADE_TRANSITION[xf.transition];
+    const offset = left.dur - xf.duration;
+    parts.push(
+      `[${left.v}][${right.v}]xfade=transition=${name}:duration=${xf.duration}:offset=${offset}[xfv${k}]`,
+    );
+    parts.push(`[${left.a}][${right.a}]acrossfade=d=${xf.duration}[xfa${k}]`);
+    streams.set(xf.id, {
+      v: `xfv${k}`,
+      a: `xfa${k}`,
+      dur: left.dur + right.dur - xf.duration,
+    });
+  });
+
+  // Concatenate the runs (lone segments and transition chains) into the spine.
+  const runs = findConcatNode(plan).inputs.map((id) => {
+    const info = streams.get(id);
+    if (!info) throw new Error(`concat references an unbuilt run ${id}`);
+    return info;
+  });
+  let vSpine: string;
+  let aSpine: string;
+  if (runs.length > 1) {
+    const n = runs.length;
+    parts.push(`${runs.map((r) => `[${r.v}]`).join("")}concat=n=${n}:v=1:a=0[vcat]`);
+    parts.push(`${runs.map((r) => `[${r.a}]`).join("")}concat=n=${n}:v=0:a=1[acat]`);
+    vSpine = "vcat";
+    aSpine = "acat";
+  } else {
+    // Single run (every boundary blended): the run's own stream is the spine.
+    vSpine = runs[0].v;
+    aSpine = runs[0].a;
+  }
 
   // Reframe to the delivery resolution.
-  parts.push(reframeFilter(findCropNode(plan), preset, "vcat", "vout"));
+  parts.push(reframeFilter(findCropNode(plan), preset, vSpine, "vout"));
 
   // Main audio: apply the clip's volume / mute.
   const audio = findAudioNode(plan);
   const gain = audio.muted ? 0 : audio.volume;
-  parts.push(`[acat]volume=${gain}[aout]`);
+  parts.push(`[${aSpine}]volume=${gain}[aout]`);
 
   return [
     "-y",

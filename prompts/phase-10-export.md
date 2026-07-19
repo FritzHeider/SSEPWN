@@ -65,7 +65,7 @@ the `renderPlan` structure from Phase 08 with real ffmpeg.
 ## Status
 
 - [x] execute.ts: cuts + concat + crop/scale
-- [ ] Transitions (xfade) rendering
+- [x] Transitions (xfade) rendering
 - [ ] B-roll (pip + full) rendering
 - [ ] CTA overlays (drawtext/image + fades) rendering
 - [ ] Caption burn-in in full pipeline

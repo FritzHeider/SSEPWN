@@ -17,6 +17,7 @@ import { PLATFORM_PRESETS } from "../src/lib/presets";
 import { addBroll } from "../src/lib/timeline/broll";
 import { splitAt } from "../src/lib/timeline/ops";
 import { buildTimelineDoc } from "../src/lib/timeline/state";
+import { setTransition } from "../src/lib/timeline/transitions";
 
 const SHORT_SAMPLE = "fixtures/short-sample.mp4";
 
@@ -24,6 +25,14 @@ const SHORT_SAMPLE = "fixtures/short-sample.mp4";
 function twoSegmentPlan() {
   let doc = buildTimelineDoc(0, 4);
   doc = splitAt(doc, 2); // seg 0..2, seg 2..4
+  return renderPlan({ timeline: doc });
+}
+
+/** The same 4 s two-segment clip, but with a `crossfade` blend at the boundary. */
+function crossfadePlan(kind: "crossfade" | "slide-left" = "crossfade", duration = 0.5) {
+  let doc = buildTimelineDoc(0, 4);
+  doc = splitAt(doc, 2); // seg-1 0..2, seg-2 2..4
+  doc = setTransition(doc, "seg-1", kind, duration);
   return renderPlan({ timeline: doc });
 }
 
@@ -60,6 +69,33 @@ describe("render/execute — buildRenderArgs (pure)", () => {
         preset: PLATFORM_PRESETS.tiktok,
       }),
     ).toThrow(/in:main/);
+  });
+
+  it("blends a crossfade boundary with xfade (video) + acrossfade (audio)", () => {
+    const args = buildRenderArgs({
+      plan: crossfadePlan("crossfade", 0.5),
+      inputPaths: { "in:main": "/tmp/in.mp4" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+      quality: "draft",
+    });
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    // Left segment is 2 s → the 0.5 s blend starts at offset 1.5 s.
+    expect(graph).toContain("xfade=transition=fade:duration=0.5:offset=1.5");
+    expect(graph).toContain("acrossfade=d=0.5");
+    // A single blended run → no multi-way concat; the run feeds reframe directly.
+    expect(graph).not.toContain("concat=n=");
+  });
+
+  it("maps slide-left to the xfade slideleft transition", () => {
+    const args = buildRenderArgs({
+      plan: crossfadePlan("slide-left", 0.4),
+      inputPaths: { "in:main": "/tmp/in.mp4" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+    });
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    expect(graph).toContain("xfade=transition=slideleft:duration=0.4:offset=1.6");
   });
 
   it("rejects a plan with a not-yet-supported node kind (B-roll)", () => {
@@ -112,5 +148,26 @@ describe("render/execute — executePlan (ffmpeg integration)", () => {
     expect(info.hasAudio).toBe(true);
     expect(await probeFaststart(out)).toBe(true);
     expect(progress).toEqual([0, 100]);
+  }, 60_000);
+
+  it("crossfade export duration = segments − overlap", async () => {
+    const out = path.join(dir, "xfade.mp4");
+    await executePlan({
+      plan: crossfadePlan("crossfade", 0.5),
+      inputPaths: { "in:main": SHORT_SAMPLE },
+      outputPath: out,
+      preset: PLATFORM_PRESETS.tiktok,
+      quality: "draft",
+    });
+
+    expect(existsSync(out)).toBe(true);
+    const info = await probe(out);
+    // 2 s + 2 s − 0.5 s blend = 3.5 s (both video xfade and audio acrossfade
+    // shorten by the overlap, so the muxed duration follows).
+    expect(info.duration).toBeGreaterThan(3.5 - 0.3);
+    expect(info.duration).toBeLessThan(3.5 + 0.3);
+    expect(info.width).toBe(1080);
+    expect(info.height).toBe(1920);
+    expect(info.hasAudio).toBe(true);
   }, 60_000);
 });
