@@ -70,7 +70,8 @@ Read `SPEC.md` first. Prerequisite: Phase 07 complete.
 - [ ] Asset library: asset picker UI
 - [x] B-roll slots: model + ops + validation (pure lib)
 - [ ] B-roll slots: editor + preview (pip and full)
-- [ ] Transitions: model + picker + validation
+- [x] Transitions: model + validation (pure lib)
+- [ ] Transitions: picker UI (between segments)
 - [ ] SFX track: model + editor + WebAudio preview
 - [ ] CTA overlays: model + presets + animated DOM preview
 - [ ] renderPlan pure compiler covering ALL features

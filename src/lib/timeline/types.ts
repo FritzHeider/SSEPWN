@@ -43,6 +43,37 @@ export interface TimelineOverlay {
   [key: string]: unknown;
 }
 
+/**
+ * How one segment hands off to the next at a playback boundary (SPEC.md Phase 08).
+ * `cut` is an instant switch (the default); the others blend the two segments over
+ * `duration` seconds. `cut` carries a `0` duration; the animated kinds are clamped
+ * to `[MIN_TRANSITION_DURATION, MAX_TRANSITION_DURATION]` and must stay shorter
+ * than both adjacent segments.
+ */
+export type TransitionKind = "cut" | "crossfade" | "slide-left" | "slide-right";
+
+/** A single boundary transition: its kind and its blend length in seconds. */
+export interface Transition {
+  kind: TransitionKind;
+  /** Blend length in seconds; `0` for `cut`. */
+  duration: number;
+}
+
+/** The accepted transition kinds, in picker order (`cut` first = default). */
+export const TRANSITION_KINDS: readonly TransitionKind[] = [
+  "cut",
+  "crossfade",
+  "slide-left",
+  "slide-right",
+] as const;
+
+/** Shortest / longest an animated transition may last (SPEC.md: 0.2–1.5 s). */
+export const MIN_TRANSITION_DURATION = 0.2;
+export const MAX_TRANSITION_DURATION = 1.5;
+
+/** Default blend length applied when a picker switches away from `cut`. */
+export const DEFAULT_TRANSITION_DURATION = 0.5;
+
 /** Audio-track settings for the whole clip (SPEC.md: "audio track with volume"). */
 export interface TimelineAudio {
   /** Linear gain; 1 = unity. Clamped to `[0, AUDIO_MAX_VOLUME]`. */
@@ -73,6 +104,15 @@ export interface TimelineDoc {
   captionTrackRef: string | null;
   /** Overlay slots (B-roll/CTA), populated in Phase 08. */
   overlayTrack: TimelineOverlay[];
+  /**
+   * Per-boundary transitions (Phase 08), keyed by the LEFT segment's id — the
+   * transition describes how that segment hands off to the next one in playback
+   * order. Only non-`cut` transitions are stored (`cut` is the default, i.e. an
+   * absent key); the `transitions.ts` ops read/write this map. Kept off segment
+   * objects so it survives a `trim`/`split`/`reorder` (`{ ...doc }` spreads it)
+   * without threading through the segment ops.
+   */
+  transitions: Record<string, Transition>;
   /** Whole-clip audio settings. */
   audio: TimelineAudio;
   /** Monotonic counter backing deterministic segment-id generation. */

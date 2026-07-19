@@ -10,10 +10,13 @@ import {
   MIN_SEGMENT_DURATION,
   TIME_EPSILON,
   TimelineError,
+  TRANSITION_KINDS,
   type TimelineAudio,
   type TimelineDoc,
   type TimelineOverlay,
   type TimelineSegment,
+  type Transition,
+  type TransitionKind,
 } from "./types";
 
 function isFiniteNumber(value: unknown): value is number {
@@ -41,6 +44,7 @@ export function buildTimelineDoc(sourceIn: number, sourceOut: number): TimelineD
     segments: [{ id: "seg-1", sourceIn, sourceOut }],
     captionTrackRef: null,
     overlayTrack: [],
+    transitions: {},
     audio: { volume: 1, muted: false },
     seq: 1,
   };
@@ -99,6 +103,29 @@ function isSegment(value: unknown): value is TimelineSegment {
   );
 }
 
+function isTransitionKind(value: unknown): value is TransitionKind {
+  return typeof value === "string" && (TRANSITION_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Read the per-boundary transition map back out of a persisted blob, keeping only
+ * well-formed non-`cut` entries (a valid kind + finite duration). A `cut` entry
+ * is dropped since `cut` is the implicit default; anything malformed is ignored
+ * rather than rejecting the whole doc, matching the light-guard style here.
+ */
+function readTransitions(value: unknown): Record<string, Transition> {
+  if (typeof value !== "object" || value === null) return {};
+  const out: Record<string, Transition> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const r = raw as Record<string, unknown>;
+    if (!isTransitionKind(r.kind) || r.kind === "cut") continue;
+    if (!isFiniteNumber(r.duration)) continue;
+    out[key] = { kind: r.kind, duration: r.duration };
+  }
+  return out;
+}
+
 function readAudio(value: unknown): TimelineAudio {
   if (typeof value !== "object" || value === null) return { volume: 1, muted: false };
   const a = value as Record<string, unknown>;
@@ -145,6 +172,7 @@ export function readTimelineDoc(state: unknown): TimelineDoc | null {
     })),
     captionTrackRef,
     overlayTrack,
+    transitions: readTransitions(t.transitions),
     audio: readAudio(t.audio),
     seq,
   };
