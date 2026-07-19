@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { CaptionEditor } from "./_components/caption-editor";
 import { CropPanel } from "./_components/crop-panel";
+import { TemplatePanel } from "./_components/template-panel";
 import { TimelinePanel } from "./_components/timeline-panel";
 import { parseId } from "@/lib/api/params";
 import type { CaptionDoc } from "@/lib/captions/ass";
@@ -11,7 +12,10 @@ import { buildCaptionDoc, readCaptionDoc } from "@/lib/captions/edit";
 import { readCropState, type CropState } from "@/lib/crop/state";
 import { db } from "@/lib/db";
 import { clipEdits, clips, projects, transcripts } from "@/lib/db/schema";
+import { isPlatformPresetId, readClipPreset, type PlatformPresetId } from "@/lib/presets";
 import { formatDuration } from "@/lib/projects/view";
+import { hasTemplateUndo } from "@/lib/templates/apply";
+import { listTemplates } from "@/lib/templates/db";
 import { buildTimelineDoc, readTimelineDoc } from "@/lib/timeline/state";
 import type { TranscriptSegment } from "@/lib/transcribe/types";
 
@@ -79,6 +83,21 @@ export default async function ClipEditorPage({ params }: { params: Promise<{ id:
   // and, like it, we do not persist the fresh doc — the first edit PATCHes it).
   const timeline = readTimelineDoc(parsedState) ?? buildTimelineDoc(clip.inPoint, clip.outPoint);
 
+  // Template gallery + platform-preset picker state, all read from the same
+  // `clip_edits.state` blob (plus the project default preset). Applying is done
+  // via the API route, so the page only supplies initial data.
+  const stateObj: Record<string, unknown> =
+    parsedState !== null && typeof parsedState === "object"
+      ? (parsedState as Record<string, unknown>)
+      : {};
+  const templates = listTemplates(db);
+  const appliedTemplateId =
+    typeof stateObj.templateId === "number" ? stateObj.templateId : null;
+  const presetOverride: PlatformPresetId | null = readClipPreset(stateObj);
+  const projectPreset: PlatformPresetId | null = isPlatformPresetId(project.platformPreset)
+    ? project.platformPreset
+    : null;
+
   const title = clip.title ?? `Clip ${clip.id}`;
   const range = `${formatDuration(clip.inPoint)} – ${formatDuration(clip.outPoint)}`;
 
@@ -106,6 +125,16 @@ export default async function ClipEditorPage({ params }: { params: Promise<{ id:
           srcWidth={project.width ?? 0}
           srcHeight={project.height ?? 0}
           initialCrop={crop}
+        />
+
+        <TemplatePanel
+          clipId={clip.id}
+          templates={templates}
+          appliedTemplateId={appliedTemplateId}
+          canUndo={hasTemplateUndo(stateObj)}
+          durationSec={clip.outPoint - clip.inPoint}
+          presetOverride={presetOverride}
+          projectPreset={projectPreset}
         />
 
         <TimelinePanel

@@ -59,8 +59,8 @@ Read `SPEC.md` first. Prerequisite: Phase 08 complete.
 - [x] applyTemplate pure function + undo snapshot
 - [x] Save-as-template
 - [x] Platform preset constants + per-project/per-clip selection
-- [ ] Max-length warning badges
-- [ ] Template gallery + manage UI
+- [x] Max-length warning badges
+- [x] Template gallery + manage UI
 - [ ] Playwright e2e for apply-template
 - [ ] All listed tests green
 - [ ] All acceptance criteria verified in one iteration
