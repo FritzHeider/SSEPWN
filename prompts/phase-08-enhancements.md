@@ -69,7 +69,7 @@ Read `SPEC.md` first. Prerequisite: Phase 07 complete.
 - [x] Asset library: worker probe + thumbnails (job handler)
 - [x] Asset library: asset picker UI
 - [x] B-roll slots: model + ops + validation (pure lib)
-- [ ] B-roll slots: editor + preview (pip and full)
+- [x] B-roll slots: editor + preview (pip and full)
 - [x] Transitions: model + validation (pure lib)
 - [ ] Transitions: picker UI (between segments)
 - [x] SFX track: model + ops + validation (pure lib)

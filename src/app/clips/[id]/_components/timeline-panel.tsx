@@ -26,6 +26,8 @@ import {
   type TimelineHistory,
 } from "@/lib/timeline/history";
 import { TimelineStrip } from "./timeline-strip";
+import { BrollPanel } from "./broll-panel";
+import { BrollPreview } from "./broll-preview";
 import { remapCaptions } from "@/lib/timeline/captions";
 import { advancePlayback, segmentIndexAt } from "@/lib/timeline/playback";
 import {
@@ -96,6 +98,7 @@ export function TimelinePanel({
   const [pxPerSec, setPxPerSec] = useState(DEFAULT_PX_PER_SEC);
   const [selectedId, setSelectedId] = useState<string | null>(initialDoc.segments[0]?.id ?? null);
   const [playhead, setPlayhead] = useState(0);
+  const [playing, setPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -232,7 +235,10 @@ export function TimelinePanel({
     playSegRef.current = step.segIndex;
     setPlayhead(step.timelineT);
     if (step.seekSource !== null) video.currentTime = step.seekSource;
-    if (step.ended) video.pause();
+    if (step.ended) {
+      video.pause();
+      setPlaying(false);
+    }
   }, [doc]);
 
   // The source clock hit the end of the file mid-sequence (the last-played
@@ -248,6 +254,7 @@ export function TimelinePanel({
       void video.play();
     } else {
       setPlayhead(totalDuration(doc));
+      setPlaying(false);
     }
   }, [doc]);
 
@@ -259,7 +266,12 @@ export function TimelinePanel({
     if (!video) return;
     const tl = timelineTimeAt(doc, video.currentTime);
     playSegRef.current = segmentIndexAt(doc, tl ?? playheadRef.current);
+    setPlaying(true);
   }, [doc]);
+
+  // Native transport pause (the `<video controls>` pause button) — keep the
+  // B-roll overlay in step with the main player.
+  const onPause = useCallback(() => setPlaying(false), []);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -271,9 +283,11 @@ export function TimelinePanel({
       playSegRef.current = segmentIndexAt(doc, startT);
       video.currentTime = sourceTimeAt(doc, startT);
       setPlayhead(startT);
+      setPlaying(true);
       void video.play();
     } else {
       video.pause();
+      setPlaying(false);
     }
   }, [doc, playhead, total]);
 
@@ -457,7 +471,7 @@ export function TimelinePanel({
         </span>
       </div>
 
-      <div className="overflow-hidden rounded-lg bg-black">
+      <div className="relative overflow-hidden rounded-lg bg-black">
         <video
           ref={videoRef}
           src={sourceVideoUrl(projectId)}
@@ -466,9 +480,11 @@ export function TimelinePanel({
           onLoadedMetadata={onLoadedMetadata}
           onTimeUpdate={onTimeUpdate}
           onPlay={onPlay}
+          onPause={onPause}
           onEnded={onEnded}
           className="w-full"
         />
+        <BrollPreview doc={doc} playhead={playhead} playing={playing} />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -537,6 +553,8 @@ export function TimelinePanel({
         />
         <span className="font-mono tabular-nums text-zinc-400">{Math.round(doc.audio.volume * 100)}%</span>
       </div>
+
+      <BrollPanel doc={doc} projectId={projectId} playhead={playhead} onRun={run} />
 
       {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
     </section>
