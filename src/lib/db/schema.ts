@@ -179,7 +179,16 @@ export const exports = sqliteTable("exports", {
     .references(() => clips.id),
   preset: text("preset").notNull(),
   outputPath: text("output_path"),
-  status: text("status").notNull().default("queued"),
+  status: text("status").notNull().default("queued"), // queued | running | done | failed
+  /**
+   * The `jobs` row rendering this export (phase-10). The export's live progress
+   * and retry state live on that job; the API joins through this to report them.
+   * Null until the API enqueues the render job. No FK constraint (jobs are
+   * append-only and never deleted) to keep the ALTER-TABLE migration trivial.
+   */
+  jobId: integer("job_id"),
+  /** stderr tail / message when the render failed, surfaced in the UI. */
+  error: text("error"),
   createdAt: integer("created_at")
     .notNull()
     .default(sql`(unixepoch())`),

@@ -1,5 +1,6 @@
 import { HumanFaceDetector } from "../../lib/crop/human";
 import type { Job, JobsDb } from "../../lib/jobs";
+import { createExportHandler } from "./export";
 import { createGenerateClipsHandler } from "./generate-clips";
 import { createIngestHandler } from "./ingest";
 import { createProbeAssetHandler } from "./probe-asset";
@@ -41,4 +42,5 @@ export const handlers: HandlerRegistry = {
   "generate-clips": createGenerateClipsHandler(),
   "smart-crop": createSmartCropHandler({ detector: new HumanFaceDetector() }),
   "probe-asset": createProbeAssetHandler(),
+  export: createExportHandler(),
 };
