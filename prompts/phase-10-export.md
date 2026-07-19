@@ -74,9 +74,9 @@ the `renderPlan` structure from Phase 08 with real ffmpeg.
 - [x] Export job handler: compile clip edit → render → data/exports file + exports row (jobId/error columns)
 - [x] Export API: POST /api/clips/:id/export + GET /api/exports/:id + /download + quality presets
 - [x] Export UI + batch export + failure/retry
-- [ ] All listed integration tests green
-- [ ] All acceptance criteria verified in one iteration
-- [ ] PHASE_COMPLETE
+- [x] All listed integration tests green
+- [x] All acceptance criteria verified in one iteration
+- [x] PHASE_COMPLETE
 
 ## Completion signal (ralph-orchestrator)
 
