@@ -10,10 +10,10 @@
  * crop/scale to the platform preset resolution, B-roll overlays (floating `pip`
  * box or `full`-frame replacement over the overlay's timeline window), CTA cards
  * (drawtext / image with fades), caption burn-in (the `ass` filter, last in the
- * video chain), and the main audio track — and encodes H.264 high + AAC 192k with
- * `+faststart`. Nodes for SFX/audio mixing are added in a later chunk; until then
- * {@link executePlan} rejects a plan containing them with a clear message rather
- * than silently dropping the feature.
+ * video chain), the main audio track, one-shot SFX cues (`adelay` + `amix`) with
+ * optional sidechain ducking of the main under them, and a −14 LUFS loudness
+ * normalise (see {@link buildAudioGraph}) — and encodes H.264 high + AAC 192k with
+ * `+faststart`.
  *
  * All ffmpeg args are assembled as an execa argv array (never a shell string),
  * per the global constraint that every ffmpeg invocation lives in
@@ -24,6 +24,7 @@ import { cropFilter } from "../crop/filter";
 import { escapeFilterPath } from "../ffmpeg/burn";
 import { runFfmpeg } from "../ffmpeg/exec";
 import type { PlatformPreset } from "../presets";
+import { buildAudioGraph } from "./audio";
 import type {
   AudioNode,
   BrollNode,
@@ -34,6 +35,7 @@ import type {
   RenderNode,
   RenderPlan,
   SegmentNode,
+  SfxNode,
   TransitionNode,
 } from "./plan";
 
@@ -66,6 +68,8 @@ const SUPPORTED_KINDS: ReadonlySet<RenderNode["kind"]> = new Set<RenderNode["kin
   "cta",
   "captions",
   "audio",
+  "sfx",
+  "mix",
 ]);
 
 /** Inset (fraction of frame) a corner/edge-anchored CTA keeps from the frame edge,
@@ -367,6 +371,10 @@ export interface ExecutePlanInput {
    * feeds the path to the `ass` filter. Ignored when the plan has no captions.
    */
   captionsAssPath?: string;
+  /** Apply the −14 LUFS loudness normalise to the output audio. Defaults to
+   * `true` (every delivered export is normalised); tests measuring the raw
+   * ducking dip disable it so the normaliser can't compensate (see DEC). */
+  loudnorm?: boolean;
   /** Encoding tier; defaults to `final`. */
   quality?: RenderQuality;
   /** Coarse progress callback (0–100). Detailed `-progress` parsing lands in a
@@ -584,10 +592,19 @@ export function buildRenderArgs(input: ExecutePlanInput): string[] {
     videoLabel = outLabel;
   });
 
-  // Main audio: apply the clip's volume / mute.
-  const audio = findAudioNode(plan);
-  const gain = audio.muted ? 0 : audio.volume;
-  parts.push(`[${aSpine}]volume=${gain}[aout]`);
+  // Audio: main track (volume/mute) + one-shot SFX (adelay/amix) with optional
+  // sidechain ducking, then a −14 LUFS loudness normalise. See buildAudioGraph.
+  const sfx = plan.nodes.filter((n): n is SfxNode => n.kind === "sfx");
+  parts.push(
+    ...buildAudioGraph({
+      aSpine,
+      audio: findAudioNode(plan),
+      sfx,
+      inputIndex,
+      loudnorm: input.loudnorm ?? true,
+      outLabel: "aout",
+    }),
+  );
 
   return [
     "-y",

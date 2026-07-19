@@ -69,7 +69,7 @@ the `renderPlan` structure from Phase 08 with real ffmpeg.
 - [x] B-roll (pip + full) rendering
 - [x] CTA overlays (drawtext/image + fades) rendering
 - [x] Caption burn-in in full pipeline
-- [ ] SFX mix + ducking + loudnorm
+- [x] SFX mix + ducking + loudnorm
 - [ ] Progress parsing → job progress
 - [ ] Export job/API/download + quality presets
 - [ ] Export UI + batch export + failure/retry

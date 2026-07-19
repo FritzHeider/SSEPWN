@@ -28,6 +28,7 @@ import { setTransition } from "../src/lib/timeline/transitions";
 const SHORT_SAMPLE = "fixtures/short-sample.mp4";
 const BROLL_SAMPLE = "fixtures/broll-sample.mp4";
 const LOGO_SAMPLE = "fixtures/logo-sample.png";
+const SFX_SAMPLE = "fixtures/sfx-sample.wav";
 
 /**
  * Whether the local ffmpeg was built with the `drawtext` filter (libfreetype).
@@ -128,6 +129,22 @@ function meanAbsDiff(a: Buffer, b: Buffer): number {
   let sum = 0;
   for (let i = 0; i < n; i++) sum += Math.abs(a[i] - b[i]);
   return sum / n;
+}
+
+/**
+ * Mean audio volume (dBFS) of `file` over the window `[ss, ss+dur]`, via ffmpeg's
+ * `volumedetect`. More negative = quieter — used to prove the main track ducks
+ * during an SFX cue (a lower mean volume with ducking on than off).
+ */
+async function meanVolumeDb(file: string, ss: number, dur: number): Promise<number> {
+  const { stderr } = await execa(
+    "ffmpeg",
+    ["-hide_banner", "-ss", String(ss), "-t", String(dur), "-i", file, "-af", "volumedetect", "-f", "null", "-"],
+    { reject: false },
+  );
+  const m = /mean_volume:\s*(-?[0-9.]+) dB/.exec(stderr);
+  if (!m) throw new Error(`no mean_volume in ffmpeg output:\n${stderr}`);
+  return Number(m[1]);
 }
 
 /** A 4 s clip cut into two 2 s segments joined by a plain cut. */
@@ -387,13 +404,67 @@ describe("render/execute — buildRenderArgs (pure)", () => {
     expect(graph).toContain("ass=/tmp/o\\'brien.ass[vout]");
   });
 
-  it("rejects a plan with a not-yet-supported node kind (SFX)", () => {
+  it("mixes an SFX cue: gained, delayed to its time, amixed into the main + loudnorm", () => {
     let doc = buildTimelineDoc(0, 4);
-    doc = addSfx(doc, { assetId: 5, t: 1 });
+    doc = addSfx(doc, { assetId: 5, t: 1, volume: 0.8 });
+    const args = buildRenderArgs({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: { "in:main": "/tmp/in.mp4", "in:asset-5": "/tmp/sfx.wav" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+    });
+    // The SFX asset is a second ffmpeg input.
+    expect(args.filter((a) => a === "-i")).toHaveLength(2);
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    // Gained to 0.8, delayed 1000 ms to t=1, mixed with the main (main first so
+    // duration=first pins the output length to the main track).
+    expect(graph).toContain("volume=0.8");
+    expect(graph).toContain("adelay=1000:all=1[sfxm0]");
+    expect(graph).toContain(
+      "amix=inputs=2:duration=first:normalize=0:dropout_transition=0[amix]",
+    );
+    // No ducking cue → no sidechain compressor. Loudnorm on by default.
+    expect(graph).not.toContain("sidechaincompress");
+    expect(graph).toContain("loudnorm=I=-14");
+  });
+
+  it("ducks the main under a ducking SFX cue via a split sidechain compressor", () => {
+    let doc = buildTimelineDoc(0, 4);
+    doc = addSfx(doc, { assetId: 5, t: 2, volume: 1, duckMain: true });
+    const args = buildRenderArgs({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: { "in:main": "/tmp/in.mp4", "in:asset-5": "/tmp/sfx.wav" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+    });
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    // The cue is split: one branch mixes into the output, one drives the sidechain.
+    expect(graph).toContain("adelay=2000:all=1,asplit=2[sfxm0][sfxd0]");
+    expect(graph).toContain("[sfxd0]sidechaincompress");
+    expect(graph).toContain("[amaind]");
+  });
+
+  it("passes audio through (anull → aout) when loudnorm is disabled", () => {
+    const args = buildRenderArgs({
+      plan: twoSegmentPlan(),
+      inputPaths: { "in:main": "/tmp/in.mp4" },
+      outputPath: "/tmp/out.mp4",
+      preset: PLATFORM_PRESETS.tiktok,
+      loudnorm: false,
+    });
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    expect(graph).not.toContain("loudnorm");
+    expect(graph).toContain("anull[aout]");
+  });
+
+  it("rejects a plan with an unknown node kind (guardrail still trips)", () => {
+    const plan = twoSegmentPlan();
+    const bogus = { kind: "bogus", id: "bogus:1", inputs: [] } as unknown as (typeof plan.nodes)[number];
+    const withBogus = { ...plan, nodes: [...plan.nodes, bogus] };
     expect(() =>
       buildRenderArgs({
-        plan: renderPlan({ timeline: doc }),
-        inputPaths: { "in:main": "/tmp/in.mp4", "in:asset-5": "/tmp/sfx.wav" },
+        plan: withBogus,
+        inputPaths: { "in:main": "/tmp/in.mp4" },
         outputPath: "/tmp/out.mp4",
         preset: PLATFORM_PRESETS.tiktok,
       }),
@@ -649,4 +720,62 @@ describe("render/execute — executePlan (ffmpeg integration)", () => {
       expect(ASS_AVAILABLE).toBe(false);
     },
   );
+
+  it("renders an SFX-mixed clip; audio present, duration unchanged", async () => {
+    expect(existsSync(SFX_SAMPLE), `${SFX_SAMPLE} missing (run npm run fixtures)`).toBe(true);
+    let doc = buildTimelineDoc(0, 4);
+    doc = addSfx(doc, { assetId: 3, t: 1, volume: 0.6 });
+    const out = path.join(dir, "sfx.mp4");
+    await executePlan({
+      plan: renderPlan({ timeline: doc }),
+      inputPaths: { "in:main": SHORT_SAMPLE, "in:asset-3": SFX_SAMPLE },
+      outputPath: out,
+      preset: PLATFORM_PRESETS.tiktok,
+      quality: "draft",
+    });
+
+    expect(existsSync(out)).toBe(true);
+    const info = await probe(out);
+    // amix duration=first pins length to the main track → the 4 s clip stays ~4 s.
+    expect(info.duration).toBeGreaterThan(4 - 0.3);
+    expect(info.duration).toBeLessThan(4 + 0.3);
+    expect(info.width).toBe(1080);
+    expect(info.height).toBe(1920);
+    expect(info.hasAudio).toBe(true);
+  }, 60_000);
+
+  it("ducking lowers the main's volume during the SFX window vs no ducking", async () => {
+    // Render the same cue with ducking on and off, loudnorm disabled so the
+    // normaliser can't compensate the dip (isolates the ducking DSP — DEC).
+    const planFor = (duck: boolean) => {
+      let doc = buildTimelineDoc(0, 4);
+      doc = addSfx(doc, { assetId: 3, t: 1, volume: 0.4, duckMain: duck });
+      return renderPlan({ timeline: doc });
+    };
+    const inputs = { "in:main": SHORT_SAMPLE, "in:asset-3": SFX_SAMPLE };
+    const ducked = path.join(dir, "ducked.mp4");
+    const plain = path.join(dir, "sfx-noduck.mp4");
+    await executePlan({
+      plan: planFor(true),
+      inputPaths: inputs,
+      outputPath: ducked,
+      preset: PLATFORM_PRESETS.tiktok,
+      quality: "draft",
+      loudnorm: false,
+    });
+    await executePlan({
+      plan: planFor(false),
+      inputPaths: inputs,
+      outputPath: plain,
+      preset: PLATFORM_PRESETS.tiktok,
+      quality: "draft",
+      loudnorm: false,
+    });
+
+    expect((await probe(ducked)).hasAudio).toBe(true);
+    // Measure a window inside the SFX (1–3 s) after the compressor's attack settles.
+    const duckedVol = await meanVolumeDb(ducked, 1.2, 0.6);
+    const plainVol = await meanVolumeDb(plain, 1.2, 0.6);
+    expect(duckedVol).toBeLessThan(plainVol);
+  }, 90_000);
 });
