@@ -7,6 +7,7 @@ import {
   resolveConfig,
 } from "../../lib/highlights/config";
 import { audioEnergy, sceneChanges } from "../../lib/highlights/extractors";
+import { fallbackCandidates, wholeVideoCandidate } from "../../lib/highlights/fallback";
 import { scoreWindows, type Candidate, type ScoreWindowsOptions } from "../../lib/highlights/score";
 import { selectClips } from "../../lib/highlights/select";
 import { snapBoundaries } from "../../lib/highlights/snap";
@@ -92,9 +93,15 @@ export interface GenerateClipsHandlerOptions {
  * The whole scoring core is pure (`src/lib/highlights`); this handler is only
  * the wiring: pull the transcript from the db, extract the two ffmpeg-derived
  * signals (RMS energy, scene changes), run score → snap → select, and persist
- * the winners. A project with no transcript (no audio, or nothing detected) has
- * nothing to clip, so the handler returns cleanly rather than failing — clips
- * are additive, exactly like the transcript that feeds them.
+ * the winners.
+ *
+ * Edge states (SPEC/Phase-11) fall out of the same select→persist tail:
+ *  - **very short** (source shorter than one min-length clip): the whole video
+ *    becomes a single clip — there is no room to cut anything;
+ *  - **no transcript** (no audio, or audio with no detectable speech): clips
+ *    come from scene cuts and energy peaks only, via `fallbackCandidates`.
+ * So a project always ends with at least one clip to work with rather than an
+ * empty grid.
  *
  * Regeneration replaces only `candidate` rows, so manually-added clips survive.
  */
@@ -110,23 +117,23 @@ export function createGenerateClipsHandler(
       throw new Error(`Project ${job.projectId} not found for generate-clips job ${job.id}`);
     }
 
+    const sourcePath = project.sourceVideoPath;
+    if (!sourcePath) {
+      throw new Error(`Project ${project.id} ("${project.name}") has no source video to clip.`);
+    }
+
     const [transcript] = db
       .select()
       .from(transcripts)
       .where(eq(transcripts.projectId, project.id))
       .all();
-    // No transcript row means transcription skipped (no audio) or has not run.
-    // There is nothing to score, and clips are additive, so leave the project
-    // as-is rather than failing the job.
-    if (!transcript) return;
-
-    const segments = JSON.parse(transcript.segments) as TranscriptSegment[];
-    if (segments.length === 0) return;
-
-    const sourcePath = project.sourceVideoPath;
-    if (!sourcePath) {
-      throw new Error(`Project ${project.id} ("${project.name}") has no source video to clip.`);
-    }
+    // No transcript row means transcription skipped (no audio) or found nothing.
+    // Rather than leave the project with no clips, fall back to scene/energy
+    // clipping below (SPEC/Phase-11 edge states); an empty transcript row is the
+    // same "no speech to score" case.
+    const segments = transcript
+      ? (JSON.parse(transcript.segments) as TranscriptSegment[])
+      : [];
 
     // The project's stored config is the base; a per-run job payload (the
     // regenerate API) layers on top of it. So a saved hook list applies to every
@@ -134,6 +141,14 @@ export function createGenerateClipsHandler(
     const cfg = resolveConfig(
       mergeConfig(projectClipConfig(project.clipConfig), parseClipConfig(job.payload)),
     );
+
+    // The probe writes `duration` on ingest; it is authoritative when present.
+    // A source shorter than one minimum clip can't be cut — the whole video
+    // becomes a single clip, and there is no signal extraction to do.
+    if (project.duration !== null && project.duration > 0 && project.duration < cfg.minLen) {
+      persistClips(db, project.id, [wholeVideoCandidate(project.duration)], segments, cfg.hookPhrases);
+      return;
+    }
 
     setProgress(10);
     // Both signals come from the source video via ffmpeg (the only place media
@@ -144,42 +159,72 @@ export function createGenerateClipsHandler(
     const scenes = await sceneChangesFn(sourcePath);
     setProgress(65);
 
-    const scoreOptions: ScoreWindowsOptions = {
-      minLen: cfg.minLen,
-      maxLen: cfg.maxLen,
-      windowLen: cfg.windowLen,
-      step: cfg.step,
-      hookPhrases: cfg.hookPhrases,
-      weights: cfg.weights,
-    };
+    // Without a stored duration (older rows) the per-second energy series is the
+    // best available timeline length.
+    const duration = project.duration ?? energy.length;
 
-    const candidates = scoreWindows(segments, energy, scoreOptions);
-    const snapped = candidates.map((c) =>
-      snapBoundaries(c, segments, scenes, { minLen: cfg.minLen, maxLen: cfg.maxLen }),
-    );
-    const selected = selectClips(snapped, { n: cfg.count, minGap: cfg.minGap });
+    let selected: Candidate[];
+    if (segments.length > 0) {
+      const scoreOptions: ScoreWindowsOptions = {
+        minLen: cfg.minLen,
+        maxLen: cfg.maxLen,
+        windowLen: cfg.windowLen,
+        step: cfg.step,
+        hookPhrases: cfg.hookPhrases,
+        weights: cfg.weights,
+      };
+      const candidates = scoreWindows(segments, energy, scoreOptions);
+      const snapped = candidates.map((c) =>
+        snapBoundaries(c, segments, scenes, { minLen: cfg.minLen, maxLen: cfg.maxLen }),
+      );
+      selected = selectClips(snapped, { n: cfg.count, minGap: cfg.minGap });
+    } else if (duration > 0 && duration < cfg.minLen) {
+      // No probe duration but the energy series is shorter than one clip.
+      selected = [wholeVideoCandidate(duration)];
+    } else {
+      // No transcript: cut by scene cuts + energy peaks only.
+      const candidates = fallbackCandidates(duration, energy, scenes, {
+        minLen: cfg.minLen,
+        maxLen: cfg.maxLen,
+        windowLen: cfg.windowLen,
+        step: cfg.step,
+      });
+      selected = selectClips(candidates, { n: cfg.count, minGap: cfg.minGap });
+    }
 
     setProgress(85);
-    // Delete-then-insert in one transaction so a regenerate replaces the old
-    // candidate set atomically — the clips panel never sees a half-written mix
-    // of old and new. `candidate` only: manual clips are the user's, not ours.
-    db.transaction((tx) => {
-      tx.delete(clips)
-        .where(and(eq(clips.projectId, project.id), eq(clips.status, "candidate")))
-        .run();
-      for (const clip of selected) {
-        tx.insert(clips)
-          .values({
-            projectId: project.id,
-            inPoint: clip.start,
-            outPoint: clip.end,
-            score: clip.score,
-            title: autoTitle(clip, segments, cfg.hookPhrases),
-            reasons: JSON.stringify(clip.reasons),
-            status: "candidate",
-          })
-          .run();
-      }
-    });
+    persistClips(db, project.id, selected, segments, cfg.hookPhrases);
   };
+}
+
+/**
+ * Replace a project's `candidate` clips with `selected`, in one transaction so a
+ * regenerate swaps the set atomically — the clips panel never sees a half-written
+ * mix of old and new. `candidate` only: manual clips are the user's, not ours.
+ */
+function persistClips(
+  db: JobContext["db"],
+  projectId: number,
+  selected: Candidate[],
+  segments: TranscriptSegment[],
+  hookPhrases: readonly string[],
+): void {
+  db.transaction((tx) => {
+    tx.delete(clips)
+      .where(and(eq(clips.projectId, projectId), eq(clips.status, "candidate")))
+      .run();
+    for (const clip of selected) {
+      tx.insert(clips)
+        .values({
+          projectId,
+          inPoint: clip.start,
+          outPoint: clip.end,
+          score: clip.score,
+          title: autoTitle(clip, segments, hookPhrases),
+          reasons: JSON.stringify(clip.reasons),
+          status: "candidate",
+        })
+        .run();
+    }
+  });
 }

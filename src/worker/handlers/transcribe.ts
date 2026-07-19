@@ -56,6 +56,11 @@ export function createTranscribeHandler(options: TranscribeHandlerOptions = {}):
         .set({ statusNote: NO_AUDIO_NOTE, transcribed: false })
         .where(eq(projects.id, project.id))
         .run();
+      // A no-audio project still gets clips — cut by scene/energy only
+      // (SPEC/Phase-11 edge states). generate-clips finds no transcript and
+      // falls back accordingly, so the pipeline chain completes rather than
+      // stopping with an empty clip grid.
+      createJobQueue(db).enqueue("generate-clips", project.id);
       return;
     }
 

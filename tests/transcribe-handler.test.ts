@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { projects, transcripts } from "../src/lib/db/schema";
+import { clips, projects, transcripts } from "../src/lib/db/schema";
 import { probe } from "../src/lib/ffmpeg/exec";
 import { createJobQueue, type Job, type JobQueue } from "../src/lib/jobs";
 import type { Transcriber, TranscriptSegment } from "../src/lib/transcribe/types";
@@ -306,7 +306,12 @@ describe("ingest → transcribe pipeline", () => {
     const worker = startWorker();
     queue.enqueue("ingest", id);
 
-    await waitFor(() => jobsOfType(id, "transcribe")[0]?.status === "done", "transcribe to finish");
+    // The no-audio branch now hands off to generate-clips (edge-state clipping),
+    // so the chain runs one job further than transcribe.
+    await waitFor(
+      () => jobsOfType(id, "generate-clips")[0]?.status === "done",
+      "clip generation to finish",
+    );
     await worker.stop();
 
     const [project] = testDb.db.select().from(projects).where(eq(projects.id, id)).all();
@@ -314,6 +319,11 @@ describe("ingest → transcribe pipeline", () => {
     expect(project.statusNote).toBe(NO_AUDIO_NOTE);
     expect(project.transcribed).toBe(false);
     expect(queue.listByProject(id).every((job) => job.status === "done")).toBe(true);
+
+    // Phase-11 edge state: a no-audio project still gets at least one clip. The
+    // 5 s fixture is shorter than one clip, so it becomes a single whole-video clip.
+    const clipRows = testDb.db.select().from(clips).where(eq(clips.projectId, id)).all();
+    expect(clipRows.length).toBeGreaterThanOrEqual(1);
   });
 
   it("does not enqueue transcribe when ingest fails", async () => {

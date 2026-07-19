@@ -207,14 +207,67 @@ describe("generate-clips handler", () => {
     expect(manual[0].title).toBe("mine");
   });
 
-  it("skips cleanly when the project has no transcript", async () => {
+  it("falls back to scene/energy clips when the project has no transcript", async () => {
+    // Phase-11 edge state: a no-audio project (or one with no detectable speech)
+    // still gets clips, cut from energy peaks and scene boundaries only — not an
+    // empty grid. (Previously this returned zero clips; the edge-state contract
+    // supersedes that.)
     const [row] = testDb.db
       .insert(projects)
-      .values({ name: "silent.mp4", sourceVideoPath: LONG_SAMPLE, status: "ready", hasAudio: false })
+      .values({
+        name: "silent.mp4",
+        sourceVideoPath: LONG_SAMPLE,
+        status: "ready",
+        duration: 90,
+        hasAudio: false,
+      })
       .returning({ id: projects.id })
       .all();
     const rows = await run(row.id, { windowLen: 20 });
-    expect(rows).toHaveLength(0);
+
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    for (const clip of rows) {
+      const len = clip.outPoint - clip.inPoint;
+      expect(len).toBeGreaterThanOrEqual(15);
+      expect(len).toBeLessThanOrEqual(90);
+      expect(clip.status).toBe("candidate");
+      expect((JSON.parse(clip.reasons ?? "[]") as string[]).length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("makes the whole video one clip when it is shorter than one clip length", async () => {
+    // Phase-11 edge state: a source shorter than the minimum clip can't be cut,
+    // so it becomes a single clip — and short-circuits before any ffmpeg call.
+    const [row] = testDb.db
+      .insert(projects)
+      .values({
+        name: "tiny.mp4",
+        sourceVideoPath: LONG_SAMPLE,
+        status: "ready",
+        duration: 5,
+        hasAudio: true,
+      })
+      .returning({ id: projects.id })
+      .all();
+
+    let extractionRan = false;
+    const rows = await run(row.id, undefined, {
+      energy: async () => {
+        extractionRan = true;
+        return [];
+      },
+      scenes: async () => {
+        extractionRan = true;
+        return [];
+      },
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].inPoint).toBe(0);
+    expect(rows[0].outPoint).toBe(5);
+    expect(rows[0].status).toBe("candidate");
+    expect(rows[0].title?.length).toBeGreaterThan(0);
+    expect(extractionRan).toBe(false);
   });
 
   it("parseClipConfig keeps only well-typed fields from an untrusted payload", () => {
