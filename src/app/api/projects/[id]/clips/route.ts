@@ -1,6 +1,8 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
+import { apiError, invalidId as invalidIdResponse, notFound as notFoundResponse, parseJsonBody } from "@/lib/api/errors";
 import { parseId } from "@/lib/api/params";
 import { db } from "@/lib/db";
 import { clips, projects } from "@/lib/db/schema";
@@ -12,20 +14,29 @@ export const dynamic = "force-dynamic";
 /** Longest a clip title may be, matching the auto-title cap in generate-clips. */
 const TITLE_MAX = 60;
 
-function invalidId() {
-  return NextResponse.json(
-    { error: "Project id must be a positive integer", code: "invalid_id" },
-    { status: 400 },
-  );
-}
+const invalidId = () => invalidIdResponse("Project");
+const notFound = (id: number) => notFoundResponse("project", id);
 
-function notFound(id: number) {
-  return NextResponse.json({ error: `No project with id ${id}`, code: "not_found" }, { status: 404 });
-}
-
-function badRequest(error: string, code: string) {
-  return NextResponse.json({ error, code }, { status: 400 });
-}
+/**
+ * A manual clip request: a finite in/out range with an optional title. The
+ * cross-field ordering (`out > in`) and the lower bound live in the schema so a
+ * backwards or negative range is caught here with the `invalid_range` code the
+ * client branches on; the source-duration bound stays in the handler because it
+ * needs the project row.
+ */
+const manualClipBody = z
+  .object({
+    inPoint: z
+      .number()
+      .refine(Number.isFinite, "inPoint and outPoint must be finite numbers")
+      .refine((n) => n >= 0, "inPoint must be >= 0"),
+    outPoint: z.number().refine(Number.isFinite, "inPoint and outPoint must be finite numbers"),
+    title: z.string().optional(),
+  })
+  .refine((b) => b.outPoint > b.inPoint, {
+    message: "outPoint must be greater than inPoint",
+    path: ["outPoint"],
+  });
 
 /**
  * GET /api/projects/:id/clips — the project's clips, best-scored first.
@@ -42,11 +53,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (clipRows === null) return notFound(id);
 
   return NextResponse.json({ projectId: id, clips: clipRows });
-}
-
-/** Read a finite number field from an untrusted body, or undefined. */
-function numField(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 /**
@@ -70,35 +76,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .get();
   if (!project) return notFound(id);
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return badRequest("Body must be valid JSON", "invalid_body");
-  }
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    return badRequest("Body must be a JSON object", "invalid_body");
-  }
+  const parsed = await parseJsonBody(request, manualClipBody, { schemaCode: "invalid_range" });
+  if (!parsed.ok) return parsed.response;
+  const { inPoint, outPoint } = parsed.data;
 
-  const body = payload as Record<string, unknown>;
-  const inPoint = numField(body.inPoint);
-  const outPoint = numField(body.outPoint);
-  if (inPoint === undefined || outPoint === undefined) {
-    return badRequest("inPoint and outPoint must be finite numbers", "invalid_range");
-  }
-  if (inPoint < 0) {
-    return badRequest("inPoint must be >= 0", "invalid_range");
-  }
-  if (outPoint <= inPoint) {
-    return badRequest("outPoint must be greater than inPoint", "invalid_range");
-  }
   // Bound to the source when we know its length (ingest writes `duration`); a
   // small epsilon absorbs float drift so an out-point exactly at the end passes.
   if (project.duration != null && outPoint > project.duration + 1e-3) {
-    return badRequest(`Range must fall within the ${project.duration}s source`, "invalid_range");
+    return apiError(400, "invalid_range", `Range must fall within the ${project.duration}s source`);
   }
 
-  const rawTitle = typeof body.title === "string" ? body.title.trim() : "";
+  const rawTitle = typeof parsed.data.title === "string" ? parsed.data.title.trim() : "";
   const title = rawTitle.length > 0 ? rawTitle.slice(0, TITLE_MAX) : "Manual clip";
 
   const [inserted] = db

@@ -1,6 +1,8 @@
 import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
+import { apiError, invalidId, notFound, parseJsonBody } from "@/lib/api/errors";
 import { parseId } from "@/lib/api/params";
 import {
   applyCropOverride,
@@ -20,6 +22,21 @@ export const dynamic = "force-dynamic";
 function badRequest(error: string, code: string) {
   return NextResponse.json({ error, code }, { status: 400 });
 }
+
+/**
+ * A smart-crop enqueue request. `aspectRatio` is left as `unknown` here and run
+ * through the shared `parseAspectRatio` (which owns the `invalid_aspect_ratio`
+ * code) so the enum stays defined in one place; only the numeric `sampleEverySec`
+ * is validated by zod, giving the `invalid_sample_every` code its own message.
+ */
+const smartCropBody = z.object({
+  aspectRatio: z.unknown(),
+  sampleEverySec: z
+    .number()
+    .refine(Number.isFinite, "sampleEverySec must be a positive number")
+    .refine((n) => n > 0, "sampleEverySec must be a positive number")
+    .optional(),
+});
 
 function loadClip(id: number) {
   return db
@@ -83,44 +100,25 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const id = parseId((await params).id);
   if (id === null) {
-    return badRequest("Clip id must be a positive integer", "invalid_id");
+    return invalidId("Clip");
   }
 
   const clip = loadClip(id);
   if (!clip) {
-    return NextResponse.json({ error: `No clip with id ${id}`, code: "not_found" }, { status: 404 });
+    return notFound("clip", id);
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return badRequest("Body must be valid JSON", "invalid_body");
-  }
-  if (typeof payload !== "object" || payload === null) {
-    return badRequest("Body must be an object with an aspectRatio", "invalid_body");
-  }
-  const body = payload as Record<string, unknown>;
+  const parsed = await parseJsonBody(request, smartCropBody, { schemaCode: "invalid_sample_every" });
+  if (!parsed.ok) return parsed.response;
 
   let aspectRatio;
   try {
-    aspectRatio = parseAspectRatio(body.aspectRatio);
+    aspectRatio = parseAspectRatio(parsed.data.aspectRatio);
   } catch (error) {
-    return badRequest(error instanceof Error ? error.message : "Invalid aspectRatio", "invalid_aspect_ratio");
+    return apiError(400, "invalid_aspect_ratio", error instanceof Error ? error.message : "Invalid aspectRatio");
   }
 
-  let sampleEverySec: number | undefined;
-  if (body.sampleEverySec !== undefined) {
-    if (
-      typeof body.sampleEverySec !== "number" ||
-      !Number.isFinite(body.sampleEverySec) ||
-      body.sampleEverySec <= 0
-    ) {
-      return badRequest("sampleEverySec must be a positive number", "invalid_sample_every");
-    }
-    sampleEverySec = body.sampleEverySec;
-  }
-
+  const sampleEverySec = parsed.data.sampleEverySec;
   const jobPayload: Record<string, unknown> = { clipId: id, aspectRatio };
   if (sampleEverySec !== undefined) jobPayload.sampleEverySec = sampleEverySec;
   const job = createJobQueue(db).enqueue("smart-crop", clip.projectId, jobPayload);
