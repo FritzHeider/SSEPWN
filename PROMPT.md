@@ -69,7 +69,7 @@ checklist.
 - [x] Phase 08 — B-roll, transitions, SFX, CTA overlays (prompts/phase-08-enhancements.md)
 - [x] Phase 09 — Templates + platform presets (prompts/phase-09-templates.md)
 - [x] Phase 10 — Export pipeline (prompts/phase-10-export.md)
-- [ ] Phase 11 — Dashboard, e2e, hardening (prompts/phase-11-hardening.md)
+- [x] Phase 11 — Dashboard, e2e, hardening (prompts/phase-11-hardening.md)
 
 ## Completion signal
 

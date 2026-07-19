@@ -69,9 +69,9 @@ the whole product coherent and prove the full journey works.
 - [x] Validation + error shape + worker crash recovery (zod body validation + centralized { error, code } shape; crash recovery done)
 - [x] Concurrent-upload test green
 - [x] Cascade delete + no orphans
-- [ ] README verified in clean clone
-- [ ] All acceptance criteria verified in one iteration
-- [ ] PHASE_COMPLETE
+- [x] README verified in clean clone
+- [x] All acceptance criteria verified in one iteration
+- [x] PHASE_COMPLETE
 
 ## Completion signal (ralph-orchestrator)
 
