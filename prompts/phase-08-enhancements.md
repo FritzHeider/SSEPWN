@@ -67,7 +67,7 @@ Read `SPEC.md` first. Prerequisite: Phase 07 complete.
 
 - [x] Asset library: schema + kind detection + upload/list API
 - [x] Asset library: worker probe + thumbnails (job handler)
-- [ ] Asset library: asset picker UI
+- [x] Asset library: asset picker UI
 - [x] B-roll slots: model + ops + validation (pure lib)
 - [ ] B-roll slots: editor + preview (pip and full)
 - [x] Transitions: model + validation (pure lib)
