@@ -6,6 +6,9 @@ import {
   formatDuration,
   formatResolution,
   hasPendingWork,
+  pipelineSteps,
+  pluralize,
+  projectCountsLabel,
   shouldShowThumbnail,
   statusBadge,
   thumbnailUrl,
@@ -112,6 +115,81 @@ describe("hasPendingWork", () => {
     // A settled list has nothing to poll for; a failed project is settled.
     expect(hasPendingWork([{ status: "failed", error: "bad file" }])).toBe(false);
     expect(hasPendingWork([])).toBe(false);
+  });
+});
+
+describe("pluralize", () => {
+  // A card that says "1 clips" reads as a bug to a user even though the count is
+  // right; the singular is the whole point of the helper.
+  it("uses the singular only on exactly one", () => {
+    expect(pluralize(1, "clip")).toBe("1 clip");
+    expect(pluralize(0, "clip")).toBe("0 clips");
+    expect(pluralize(2, "clip")).toBe("2 clips");
+  });
+
+  it("takes an explicit plural for irregular words", () => {
+    expect(pluralize(1, "entry", "entries")).toBe("1 entry");
+    expect(pluralize(3, "entry", "entries")).toBe("3 entries");
+  });
+});
+
+describe("projectCountsLabel", () => {
+  it("joins clip and export counts, each pluralized independently", () => {
+    expect(projectCountsLabel({ clipCount: 3, exportCount: 1 })).toBe("3 clips · 1 export");
+    expect(projectCountsLabel({ clipCount: 1, exportCount: 0 })).toBe("1 clip · 0 exports");
+  });
+});
+
+describe("pipelineSteps", () => {
+  const labels = (project: { status: string; transcribed: boolean; clipCount: number }) =>
+    pipelineSteps(project).map((s) => `${s.label}:${s.state}`);
+
+  // The stepper is derived, never stored: a fully-processed project is three
+  // green checks regardless of how many times a job died and re-ran.
+  it("marks every step done once clips exist on a ready project", () => {
+    expect(labels({ status: "ready", transcribed: true, clipCount: 4 })).toEqual([
+      "Uploaded:done",
+      "Transcribed:done",
+      "Clips ready:done",
+    ]);
+  });
+
+  // The first incomplete step is where attention goes; later steps wait.
+  it("marks the first incomplete step active and the rest pending", () => {
+    expect(labels({ status: "uploaded", transcribed: false, clipCount: 0 })).toEqual([
+      "Uploaded:done",
+      "Transcribed:active",
+      "Clips ready:pending",
+    ]);
+    expect(labels({ status: "uploaded", transcribed: true, clipCount: 0 })).toEqual([
+      "Uploaded:done",
+      "Transcribed:done",
+      "Clips ready:active",
+    ]);
+  });
+
+  // A failed project stops at its first incomplete step; completed work stays
+  // done so "transcribed, then clip generation failed" is legible.
+  it("marks the first incomplete step failed when the project failed", () => {
+    expect(labels({ status: "failed", transcribed: true, clipCount: 0 })).toEqual([
+      "Uploaded:done",
+      "Transcribed:done",
+      "Clips ready:failed",
+    ]);
+    expect(labels({ status: "failed", transcribed: false, clipCount: 0 })).toEqual([
+      "Uploaded:done",
+      "Transcribed:failed",
+      "Clips ready:pending",
+    ]);
+  });
+
+  // A brand-new `created` row has not even landed its bytes yet.
+  it("treats a created project as not-yet-uploaded", () => {
+    expect(labels({ status: "created", transcribed: false, clipCount: 0 })).toEqual([
+      "Uploaded:active",
+      "Transcribed:pending",
+      "Clips ready:pending",
+    ]);
   });
 });
 

@@ -8,6 +8,7 @@ import {
   formatDuration,
   formatResolution,
   hasPendingWork,
+  projectCountsLabel,
   shouldShowThumbnail,
   statusBadge,
   thumbnailUrl,
@@ -96,6 +97,28 @@ export function ProjectsPanel({ initialProjects }: { initialProjects: ProjectVie
     [upload],
   );
 
+  const remove = useCallback(async (project: ProjectView) => {
+    // The list is small and the row is the whole story, so a browser confirm is
+    // proportionate — a delete cascades files and every related row (DEC on
+    // cascade delete), and there is no undo.
+    if (!window.confirm(`Delete "${project.name}"? This removes its clips, exports and files.`)) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/projects/${project.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        setError(body?.error ?? `Delete failed (${response.status})`);
+        return;
+      }
+      // Drop it locally rather than refetch: the server already committed, and a
+      // refetch would race a still-in-flight poll for the row we just removed.
+      setProjects((current) => current.filter((p) => p.id !== project.id));
+    } catch {
+      setError("Delete failed — is the server still running?");
+    }
+  }, []);
+
   return (
     <div className="flex w-full flex-col gap-8">
       <section>
@@ -150,7 +173,7 @@ export function ProjectsPanel({ initialProjects }: { initialProjects: ProjectVie
         ) : (
           <ul className="flex flex-col gap-2">
             {projects.map((project) => (
-              <ProjectRow key={project.id} project={project} />
+              <ProjectRow key={project.id} project={project} onDelete={remove} />
             ))}
           </ul>
         )}
@@ -159,7 +182,13 @@ export function ProjectsPanel({ initialProjects }: { initialProjects: ProjectVie
   );
 }
 
-function ProjectRow({ project }: { project: ProjectView }) {
+function ProjectRow({
+  project,
+  onDelete,
+}: {
+  project: ProjectView;
+  onDelete: (project: ProjectView) => void;
+}) {
   const badge = statusBadge(project);
   const duration = formatDuration(project.duration);
   const resolution = formatResolution(project.width, project.height);
@@ -180,6 +209,9 @@ function ProjectRow({ project }: { project: ProjectView }) {
         <span className="text-sm text-zinc-500 dark:text-zinc-400">
           {duration === EMPTY && resolution === EMPTY ? "Probing…" : `${duration} · ${resolution}`}
         </span>
+        {project.clipCount > 0 ? (
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">{projectCountsLabel(project)}</span>
+        ) : null}
         {badge.detail ? (
           <span className="text-sm text-red-700 dark:text-red-400">{badge.detail}</span>
         ) : null}
@@ -189,6 +221,14 @@ function ProjectRow({ project }: { project: ProjectView }) {
       >
         {badge.label}
       </span>
+      <button
+        type="button"
+        onClick={() => onDelete(project)}
+        aria-label={`Delete ${project.name}`}
+        className="shrink-0 rounded-md px-2 py-1 text-sm text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+      >
+        Delete
+      </button>
     </li>
   );
 }

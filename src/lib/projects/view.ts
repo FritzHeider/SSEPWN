@@ -16,6 +16,12 @@ export interface ProjectView {
   width: number | null;
   height: number | null;
   thumbnailPath: string | null;
+  /** True once a transcript exists — drives the pipeline stepper. */
+  transcribed: boolean;
+  /** Candidate + manual clips generated for this project (dashboard cards). */
+  clipCount: number;
+  /** Renders queued/running/done/failed across all this project's clips. */
+  exportCount: number;
 }
 
 /** Visual weight of a badge; maps to colour in the component, not here. */
@@ -111,4 +117,54 @@ export function thumbnailUrl(projectId: number): string {
  */
 export function hasPendingWork(projects: ReadonlyArray<Pick<ProjectView, "status" | "error">>): boolean {
   return projects.some((project) => statusBadge(project).pending);
+}
+
+/** `1 clip`, `3 clips` — singular only on exactly one. */
+export function pluralize(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+/**
+ * The `N clips · M exports` line on a dashboard card. Shown once a project has
+ * produced clips; before that the counts are both zero and say nothing a user
+ * needs, so the component gates on `clipCount` rather than always rendering it.
+ */
+export function projectCountsLabel(project: Pick<ProjectView, "clipCount" | "exportCount">): string {
+  return `${pluralize(project.clipCount, "clip")} · ${pluralize(project.exportCount, "export")}`;
+}
+
+/** One node of the pipeline stepper; `state` maps to colour in the component. */
+export type StepState = "done" | "active" | "failed" | "pending";
+
+export interface PipelineStep {
+  label: string;
+  state: StepState;
+}
+
+const STEP_LABELS = ["Uploaded", "Transcribed", "Clips ready"] as const;
+
+/**
+ * The upload → transcribe → clips pipeline as three ordered steps, each resolved
+ * from durable facts rather than a mutable "current step" column: a project row
+ * past `created` has its bytes, `transcribed` flips when a transcript lands, and
+ * a positive `clipCount` means generation finished. Deriving from state keeps the
+ * stepper honest across the worker's crash-recovery re-queues (a job that dies
+ * and re-runs never rewinds the display).
+ *
+ * A `failed` project marks its first incomplete step failed — that is where the
+ * chain stopped — while completed steps stay done, so "transcribed but clip
+ * generation failed" reads correctly instead of blanking the whole strip.
+ */
+export function pipelineSteps(
+  project: Pick<ProjectView, "status" | "transcribed" | "clipCount">,
+): PipelineStep[] {
+  const done = [project.status !== "created", project.transcribed, project.clipCount > 0];
+  const failed = project.status === "failed";
+  const firstIncomplete = done.indexOf(false);
+
+  return STEP_LABELS.map((label, index) => {
+    if (done[index]) return { label, state: "done" };
+    if (index === firstIncomplete) return { label, state: failed ? "failed" : "active" };
+    return { label, state: "pending" };
+  });
 }

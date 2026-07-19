@@ -8,7 +8,14 @@ import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { listClips } from "@/lib/projects/clips";
 import { readTranscript } from "@/lib/projects/transcript";
-import { formatDuration, formatResolution, statusBadge, EMPTY } from "@/lib/projects/view";
+import {
+  EMPTY,
+  formatDuration,
+  formatResolution,
+  pipelineSteps,
+  statusBadge,
+  type PipelineStep,
+} from "@/lib/projects/view";
 
 // Reads the projects and transcripts tables per request; nothing here is static.
 export const dynamic = "force-dynamic";
@@ -41,6 +48,11 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const badge = statusBadge(project);
   const duration = formatDuration(project.duration);
   const resolution = formatResolution(project.width, project.height);
+  const steps = pipelineSteps({
+    status: project.status,
+    transcribed: project.transcribed,
+    clipCount: clips.length,
+  });
 
   return (
     <div className="flex flex-1 justify-center bg-zinc-50 px-6 py-12 font-sans dark:bg-black">
@@ -62,6 +74,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           {badge.detail ? (
             <p className="text-sm text-red-700 dark:text-red-400">{badge.detail}</p>
           ) : null}
+          <PipelineStepper steps={steps} />
         </header>
 
         <ProjectWorkspace
@@ -72,5 +85,39 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         />
       </main>
     </div>
+  );
+}
+
+const STEP_DOT: Readonly<Record<PipelineStep["state"], string>> = {
+  done: "bg-emerald-500 text-white",
+  active: "bg-blue-500 text-white",
+  failed: "bg-red-500 text-white",
+  pending: "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
+};
+
+const STEP_TEXT: Readonly<Record<PipelineStep["state"], string>> = {
+  done: "text-zinc-900 dark:text-zinc-100",
+  active: "text-zinc-900 dark:text-zinc-100",
+  failed: "text-red-700 dark:text-red-400",
+  pending: "text-zinc-400 dark:text-zinc-500",
+};
+
+/** upload → transcribe → clips, rendered from `pipelineSteps` (tested there). */
+function PipelineStepper({ steps }: { steps: PipelineStep[] }) {
+  return (
+    <ol className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2" aria-label="Pipeline progress">
+      {steps.map((step, index) => (
+        <li key={step.label} className="flex items-center gap-2">
+          <span
+            className={`flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold ${STEP_DOT[step.state]}`}
+            aria-hidden
+          >
+            {step.state === "done" ? "✓" : step.state === "failed" ? "!" : index + 1}
+          </span>
+          <span className={`text-sm ${STEP_TEXT[step.state]}`}>{step.label}</span>
+          {index < steps.length - 1 ? <span className="text-zinc-300 dark:text-zinc-700">→</span> : null}
+        </li>
+      ))}
+    </ol>
   );
 }
