@@ -75,7 +75,7 @@ Read `SPEC.md` first. Prerequisite: Phase 07 complete.
 - [x] SFX track: model + ops + validation (pure lib)
 - [ ] SFX track: editor + WebAudio preview UI
 - [x] CTA overlays: model + presets (pure lib)
-- [ ] CTA overlays: animated DOM preview UI
+- [x] CTA overlays: animated DOM preview UI
 - [x] renderPlan pure compiler covering ALL features
 - [ ] Playwright e2e for B-roll + CTA persistence
 - [ ] All listed tests green

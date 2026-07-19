@@ -24,3 +24,32 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Phase-08 CTA overlay animations. The preview scrubs these to the exact frame
+ * with a negative animation-delay (see cta-view.ts / cta-preview.tsx): a slide
+ * enters from — and exits toward — the anchored vertical edge, so the keyframe
+ * transform (a small translate) never touches the outer anchor centring. */
+@keyframes cta-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes cta-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes cta-slide-in-up {
+  from { opacity: 0; transform: translateY(12%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes cta-slide-in-down {
+  from { opacity: 0; transform: translateY(-12%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes cta-slide-out-up {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-12%); }
+}
+@keyframes cta-slide-out-down {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(12%); }
+}

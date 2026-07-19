@@ -28,6 +28,8 @@ import {
 import { TimelineStrip } from "./timeline-strip";
 import { BrollPanel } from "./broll-panel";
 import { BrollPreview } from "./broll-preview";
+import { CtaPanel } from "./cta-panel";
+import { CtaPreview } from "./cta-preview";
 import { remapCaptions } from "@/lib/timeline/captions";
 import { advancePlayback, segmentIndexAt } from "@/lib/timeline/playback";
 import {
@@ -485,6 +487,7 @@ export function TimelinePanel({
           className="w-full"
         />
         <BrollPreview doc={doc} playhead={playhead} playing={playing} />
+        <CtaPreview doc={doc} playhead={playhead} playing={playing} />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -555,6 +558,8 @@ export function TimelinePanel({
       </div>
 
       <BrollPanel doc={doc} projectId={projectId} playhead={playhead} onRun={run} />
+
+      <CtaPanel doc={doc} projectId={projectId} playhead={playhead} onRun={run} />
 
       {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
     </section>
