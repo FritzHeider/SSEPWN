@@ -22,7 +22,7 @@
 
 import { cropFilter } from "../crop/filter";
 import { escapeFilterPath } from "../ffmpeg/burn";
-import { runFfmpeg } from "../ffmpeg/exec";
+import { runFfmpeg, runFfmpegWithProgress } from "../ffmpeg/exec";
 import type { PlatformPreset } from "../presets";
 import { buildAudioGraph } from "./audio";
 import type {
@@ -377,8 +377,10 @@ export interface ExecutePlanInput {
   loudnorm?: boolean;
   /** Encoding tier; defaults to `final`. */
   quality?: RenderQuality;
-  /** Coarse progress callback (0–100). Detailed `-progress` parsing lands in a
-   * later chunk; this chunk reports start/end only. */
+  /** Progress callback (0–100). `executePlan` reports 0 at start, strictly
+   * increasing intermediate values parsed from ffmpeg's `-progress` output
+   * (mapped against `plan.duration`), then 100 once the mux completes. When an
+   * injected `runFfmpegFn` is supplied (tests), only the 0/100 bookends fire. */
   onProgress?: (pct: number) => void;
   /** Injectable ffmpeg runner (tests can stub it to assert args without running). */
   runFfmpegFn?: (args: string[]) => Promise<unknown>;
@@ -637,14 +639,28 @@ export function buildRenderArgs(input: ExecutePlanInput): string[] {
 
 /**
  * Render a plan to `outputPath`. Builds the argv with {@link buildRenderArgs}
- * and runs ffmpeg (or the injected runner). Reports coarse progress; a failing
- * ffmpeg run rejects with execa's error (stderr included) so the caller can
- * surface it into the job's error column.
+ * and runs ffmpeg (or the injected runner). Reports 0 → parsed intermediate
+ * ticks → 100 progress; a failing ffmpeg run rejects with execa's error (stderr
+ * included) so the caller can surface it into the job's error column.
+ *
+ * With a real ffmpeg run and an `onProgress` callback, ffmpeg's `-progress`
+ * output is parsed against `plan.duration` into strictly-increasing 0–99 ticks
+ * (see {@link runFfmpegWithProgress}); the terminal 100 fires only after the mux
+ * exits. An injected `runFfmpegFn` (tests asserting argv) bypasses parsing and
+ * gets just the 0/100 bookends.
  */
 export async function executePlan(input: ExecutePlanInput): Promise<void> {
   const args = buildRenderArgs(input);
   input.onProgress?.(0);
-  const run = input.runFfmpegFn ?? runFfmpeg;
-  await run(args);
+  if (input.runFfmpegFn) {
+    await input.runFfmpegFn(args);
+  } else if (input.onProgress) {
+    await runFfmpegWithProgress(args, {
+      totalDuration: input.plan.duration,
+      onProgress: input.onProgress,
+    });
+  } else {
+    await runFfmpeg(args);
+  }
   input.onProgress?.(100);
 }

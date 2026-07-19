@@ -507,7 +507,18 @@ describe("render/execute — executePlan (ffmpeg integration)", () => {
     expect(info.height).toBe(1920);
     expect(info.hasAudio).toBe(true);
     expect(await probeFaststart(out)).toBe(true);
-    expect(progress).toEqual([0, 100]);
+    // Progress is now parsed from ffmpeg's `-progress` output: it opens at 0,
+    // closes at 100, never decreases, and stays in range. Intermediate ticks
+    // depend on ffmpeg's cadence, so we assert the invariants, not exact values.
+    expect(progress[0]).toBe(0);
+    expect(progress.at(-1)).toBe(100);
+    for (const p of progress) {
+      expect(p).toBeGreaterThanOrEqual(0);
+      expect(p).toBeLessThanOrEqual(100);
+    }
+    for (let i = 1; i < progress.length; i++) {
+      expect(progress[i]).toBeGreaterThanOrEqual(progress[i - 1]);
+    }
   }, 60_000);
 
   it("crossfade export duration = segments − overlap", async () => {

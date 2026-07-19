@@ -2,6 +2,63 @@ import { open } from "node:fs/promises";
 
 import { execa, type Result } from "execa";
 
+/**
+ * Parse the running output time out of a chunk of ffmpeg `-progress` output and
+ * express it as a percentage of the known total duration. PURE — no ffmpeg, so
+ * the mapping is unit-testable.
+ *
+ * ffmpeg's `-progress` writer emits repeating key/value blocks; the reliable
+ * time key is `out_time_us` (microseconds). A single stdout `data` chunk can
+ * carry several blocks, so we take the LAST `out_time_us` in the chunk (the most
+ * recent position). Returns `null` when the chunk carries no usable time or the
+ * total is non-positive, so the caller can skip an update rather than emit a
+ * bogus value. The result is clamped to `[0, 99]` — the terminal 100 is reserved
+ * for the caller to emit once the process actually exits, so a progress tick can
+ * never claim completion before the mux finishes.
+ */
+export function parseFfmpegProgress(chunk: string, totalDuration: number): number | null {
+  if (!(totalDuration > 0)) return null;
+  const matches = chunk.match(/out_time_us=(\d+)/g);
+  if (!matches || matches.length === 0) return null;
+  const last = matches[matches.length - 1];
+  const us = Number(last.slice("out_time_us=".length));
+  if (!Number.isFinite(us) || us < 0) return null;
+  const pct = (us / 1_000_000 / totalDuration) * 100;
+  return Math.max(0, Math.min(99, Math.round(pct)));
+}
+
+/** Options for {@link runFfmpegWithProgress}. */
+export interface FfmpegProgressOptions {
+  /** Expected output duration (seconds) — the denominator for the 0–100 map. */
+  totalDuration: number;
+  /** Called with each strictly-increasing percentage (0–99) as ffmpeg advances. */
+  onProgress?: (pct: number) => void;
+}
+
+/**
+ * Run ffmpeg while streaming `-progress` output into monotonic 0–99 progress
+ * callbacks. Prepends `-progress pipe:1 -nostats` so ffmpeg writes machine-
+ * readable key/value progress to stdout (stats off keeps stderr for the error
+ * tail). stderr is still buffered, so a non-zero exit rejects with execa's error
+ * (stderr included) exactly like {@link runFfmpeg}. Percentages only ever
+ * increase; the caller emits the final 100 after this resolves.
+ */
+export function runFfmpegWithProgress(
+  args: string[],
+  opts: FfmpegProgressOptions,
+): Promise<Result> {
+  const subprocess = execa("ffmpeg", ["-progress", "pipe:1", "-nostats", ...args]);
+  let last = -1;
+  subprocess.stdout?.on("data", (buf: Buffer) => {
+    const pct = parseFfmpegProgress(buf.toString(), opts.totalDuration);
+    if (pct !== null && pct > last) {
+      last = pct;
+      opts.onProgress?.(pct);
+    }
+  });
+  return subprocess;
+}
+
 export interface ProbeResult {
   /** Duration in seconds. */
   duration: number;
