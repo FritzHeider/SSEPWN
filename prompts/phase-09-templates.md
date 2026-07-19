@@ -62,9 +62,9 @@ Read `SPEC.md` first. Prerequisite: Phase 08 complete.
 - [x] Max-length warning badges
 - [x] Template gallery + manage UI
 - [x] Playwright e2e for apply-template
-- [ ] All listed tests green
-- [ ] All acceptance criteria verified in one iteration
-- [ ] PHASE_COMPLETE
+- [x] All listed tests green
+- [x] All acceptance criteria verified in one iteration
+- [x] PHASE_COMPLETE
 
 ## Completion signal (ralph-orchestrator)
 
