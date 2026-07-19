@@ -83,6 +83,33 @@ export interface TimelineAudio {
 }
 
 /**
+ * One sound-effect cue on the SFX track (SPEC.md Phase 08). An audio asset is
+ * played once, starting at timeline second `t` (the edited-playback clock), at a
+ * given linear `volume`; when `duckMain` is set the clip's main audio is dipped
+ * while the cue plays so the effect cuts through. Unlike a B-roll slot a cue has
+ * no explicit end — its length is the asset's own duration — so only its start is
+ * modelled here.
+ */
+export interface SfxCue {
+  /** Stable identifier, unique within the SFX track (e.g. "sfx-4"). */
+  id: string;
+  /** Row id of the source asset in the `assets` table (an audio asset). */
+  assetId: number;
+  /** Placement in timeline seconds (`>= 0`, `<= totalDuration`). */
+  t: number;
+  /** Linear gain for this cue; 1 = unity. Clamped to `[0, SFX_MAX_VOLUME]`. */
+  volume: number;
+  /** When true, dip the main audio while this cue plays. */
+  duckMain: boolean;
+}
+
+/** Upper clamp for {@link SfxCue.volume} (allow up to +6 dB ≈ 2×, like the main track). */
+export const SFX_MAX_VOLUME = 2;
+
+/** Default gain applied to a freshly placed SFX cue. */
+export const DEFAULT_SFX_VOLUME = 1;
+
+/**
  * The timeline portion of a clip's `clip_edits.state` blob. `bounds` are the
  * clip's original source in/out points, copied in at build time so every op is
  * self-contained — `trim` can clamp to the clip window without re-reading the
@@ -113,6 +140,12 @@ export interface TimelineDoc {
    * without threading through the segment ops.
    */
   transitions: Record<string, Transition>;
+  /**
+   * Sound-effect cues (Phase 08): one-shot audio assets scheduled on the edited
+   * timeline. Kept as its own track (not on `overlayTrack`, which is visual
+   * B-roll/CTA) so the `sfx.ts` ops and `renderPlan` read it directly.
+   */
+  sfxTrack: SfxCue[];
   /** Whole-clip audio settings. */
   audio: TimelineAudio;
   /** Monotonic counter backing deterministic segment-id generation. */

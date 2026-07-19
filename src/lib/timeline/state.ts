@@ -8,9 +8,11 @@
 import {
   AUDIO_MAX_VOLUME,
   MIN_SEGMENT_DURATION,
+  SFX_MAX_VOLUME,
   TIME_EPSILON,
   TimelineError,
   TRANSITION_KINDS,
+  type SfxCue,
   type TimelineAudio,
   type TimelineDoc,
   type TimelineOverlay,
@@ -45,6 +47,7 @@ export function buildTimelineDoc(sourceIn: number, sourceOut: number): TimelineD
     captionTrackRef: null,
     overlayTrack: [],
     transitions: {},
+    sfxTrack: [],
     audio: { volume: 1, muted: false },
     seq: 1,
   };
@@ -126,6 +129,29 @@ function readTransitions(value: unknown): Record<string, Transition> {
   return out;
 }
 
+/**
+ * Read the SFX track back out of a persisted blob, keeping only well-formed cues
+ * (finite positive `assetId`, finite `t`) and clamping each cue's `volume` into
+ * `[0, SFX_MAX_VOLUME]`. Malformed entries are dropped rather than rejecting the
+ * whole doc, matching the light-guard style of `readTransitions`.
+ */
+function readSfxTrack(value: unknown): SfxCue[] {
+  if (!Array.isArray(value)) return [];
+  const out: SfxCue[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.id !== "string") continue;
+    if (!isFiniteNumber(r.assetId) || r.assetId <= 0) continue;
+    if (!isFiniteNumber(r.t)) continue;
+    const volume = isFiniteNumber(r.volume)
+      ? Math.min(SFX_MAX_VOLUME, Math.max(0, r.volume))
+      : 1;
+    out.push({ id: r.id, assetId: r.assetId, t: r.t, volume, duckMain: r.duckMain === true });
+  }
+  return out;
+}
+
 function readAudio(value: unknown): TimelineAudio {
   if (typeof value !== "object" || value === null) return { volume: 1, muted: false };
   const a = value as Record<string, unknown>;
@@ -173,6 +199,7 @@ export function readTimelineDoc(state: unknown): TimelineDoc | null {
     captionTrackRef,
     overlayTrack,
     transitions: readTransitions(t.transitions),
+    sfxTrack: readSfxTrack(t.sfxTrack),
     audio: readAudio(t.audio),
     seq,
   };
