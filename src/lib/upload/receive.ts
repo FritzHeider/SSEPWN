@@ -1,6 +1,6 @@
 import busboy from "busboy";
 
-import { ALLOWED_VIDEO_TYPES, allowedExtensions } from "./allowed";
+import { ALLOWED_VIDEO_TYPES } from "./allowed";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, unlink } from "node:fs/promises";
@@ -43,6 +43,13 @@ export interface ReceivedUpload {
 export interface ReceiveUploadOptions {
   uploadDir?: string;
   maxBytes?: number;
+  /**
+   * MIME → allowed-extensions map the upload is checked against. Defaults to
+   * source-video types; the asset library passes a wider map (video/audio/
+   * image). Same contract as `ALLOWED_VIDEO_TYPES`: the declared MIME type must
+   * be a key AND the filename extension must be one it lists.
+   */
+  allowedTypes?: Readonly<Record<string, readonly string[]>>;
 }
 
 /** Where uploads land; overridable so tests never write into the real data dir. */
@@ -58,8 +65,8 @@ export function maxUploadBytes(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : MAX_UPLOAD_BYTES;
 }
 
-function describeAllowed(): string {
-  return allowedExtensions().join(", ");
+function describeAllowed(allowedTypes: Readonly<Record<string, readonly string[]>>): string {
+  return [...new Set(Object.values(allowedTypes).flat())].join(", ");
 }
 
 /**
@@ -81,6 +88,7 @@ export async function receiveUpload(
 ): Promise<ReceivedUpload> {
   const dir = options.uploadDir ?? uploadDir();
   const maxBytes = options.maxBytes ?? maxUploadBytes();
+  const allowedTypes = options.allowedTypes ?? ALLOWED_VIDEO_TYPES;
 
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
@@ -135,7 +143,7 @@ export async function receiveUpload(
       const originalName = info.filename ?? "";
       const mimeType = (info.mimeType ?? "").toLowerCase();
       const ext = path.extname(originalName).toLowerCase();
-      const allowedExts = ALLOWED_VIDEO_TYPES[mimeType];
+      const allowedExts = allowedTypes[mimeType];
 
       // Runs before any file byte is read — nothing is written for a bad type.
       if (!allowedExts || !allowedExts.includes(ext)) {
@@ -143,7 +151,7 @@ export async function receiveUpload(
         fail(
           new UploadError(
             "unsupported_type",
-            `Unsupported file type "${mimeType || "unknown"}" (${originalName || "unnamed"}). Allowed: ${describeAllowed()}`,
+            `Unsupported file type "${mimeType || "unknown"}" (${originalName || "unnamed"}). Allowed: ${describeAllowed(allowedTypes)}`,
           ),
         );
         return;

@@ -65,7 +65,8 @@ Read `SPEC.md` first. Prerequisite: Phase 07 complete.
 
 ## Status
 
-- [ ] Asset library (upload, probe, thumbnails, picker UI)
+- [x] Asset library: schema + kind detection + upload/list API
+- [ ] Asset library: worker probe + thumbnails + picker UI
 - [ ] B-roll slots: model + editor + preview (pip and full)
 - [ ] Transitions: model + picker + validation
 - [ ] SFX track: model + editor + WebAudio preview

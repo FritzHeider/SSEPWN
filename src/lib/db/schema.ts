@@ -47,9 +47,19 @@ export const projects = sqliteTable("projects", {
 export const assets = sqliteTable("assets", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   projectId: integer("project_id").references(() => projects.id),
-  type: text("type").notNull(), // source | broll | sfx
+  /** Semantic role: source | broll | sfx | logo | cta (defaults to `kind`). */
+  type: text("type").notNull(),
+  /** Media class detected at upload: video | audio | image. */
+  kind: text("kind"),
+  /** Declared MIME type accepted at the upload boundary. */
+  mime: text("mime"),
   path: text("path").notNull(),
   originalName: text("original_name"),
+  // Probed metadata (filled by the asset-probe worker job; null until then).
+  width: integer("width"),
+  height: integer("height"),
+  duration: real("duration"),
+  thumbnailPath: text("thumbnail_path"),
   createdAt: integer("created_at")
     .notNull()
     .default(sql`(unixepoch())`),
