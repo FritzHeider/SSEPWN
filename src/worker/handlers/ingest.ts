@@ -4,7 +4,9 @@ import path from "node:path";
 import { projects } from "../../lib/db/schema";
 import { probe, type ProbeResult } from "../../lib/ffmpeg/exec";
 import { generateThumbnail, posterTimestamp } from "../../lib/ffmpeg/thumbnail";
+import { generateWaveform } from "../../lib/ffmpeg/waveform";
 import { createJobQueue } from "../../lib/jobs";
+import { waveformPath } from "../../lib/media/derived";
 import type { JobHandler, JobContext } from "./index";
 
 /** Where poster frames land; overridable so tests never write into the real data dir. */
@@ -20,6 +22,10 @@ export interface IngestHandlerOptions {
   probeFn?: (path: string) => Promise<ProbeResult>;
   generateThumbnailFn?: typeof generateThumbnail;
   dir?: () => string;
+  /** Injected in tests; defaults to the real showwavespic wrapper. */
+  generateWaveformFn?: typeof generateWaveform;
+  /** Where the waveform PNG lands; defaults to the shared derived-path helper. */
+  waveformPathFn?: (projectId: number) => string;
 }
 
 /**
@@ -60,6 +66,8 @@ export function createIngestHandler(options: IngestHandlerOptions = {}): JobHand
   const probeFn = options.probeFn ?? probe;
   const generateThumbnailFn = options.generateThumbnailFn ?? generateThumbnail;
   const dir = options.dir ?? thumbnailDir;
+  const generateWaveformFn = options.generateWaveformFn ?? generateWaveform;
+  const waveformPathFn = options.waveformPathFn ?? waveformPath;
 
   return async function ingest({ job, db, setProgress }: JobContext): Promise<void> {
     const [project] = db.select().from(projects).where(eq(projects.id, job.projectId)).all();
@@ -102,6 +110,18 @@ export function createIngestHandler(options: IngestHandlerOptions = {}): JobHand
         })
         .where(eq(projects.id, project.id))
         .run();
+
+      // Waveform is a nicety, not part of the pipeline contract, so it is
+      // best-effort and non-fatal: a failure here must never mark a good video
+      // `failed` or block transcription. Only projects with audio get one.
+      if (metadata.hasAudio) {
+        try {
+          await generateWaveformFn(sourcePath, waveformPathFn(project.id));
+        } catch (waveformError) {
+          const reason = waveformError instanceof Error ? waveformError.message : String(waveformError);
+          console.warn(`[ingest] waveform render failed for project ${project.id}: ${reason}`);
+        }
+      }
 
       // Hand off to phase-03. This sits INSIDE the try and after the metadata
       // write on purpose: a transcribe job queued for a project whose probe

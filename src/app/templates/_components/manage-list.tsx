@@ -3,23 +3,24 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { TemplateThumb } from "@/app/clips/[id]/_components/template-thumb";
 import type { Template } from "@/lib/templates/types";
 
 const btn =
-  "rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900";
+  "cursor-pointer rounded-md border border-border-subtle px-2.5 py-1 text-xs font-medium text-text transition-colors hover:bg-surface-overlay disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
 function Swatch({ color }: { color: string }) {
   return (
     <span
-      className="inline-block h-4 w-4 rounded-full border border-black/10 dark:border-white/20"
+      className="inline-block h-4 w-4 rounded-full border border-border-subtle"
       style={{ backgroundColor: color }}
       title={color}
     />
   );
 }
 
-/** One manage row: swatches + AR/preset badges, then rename/delete for saved
- * templates or a lock note for built-ins (which are undeletable per SPEC). */
+/** One manage row: a live style thumbnail + swatches + AR/preset badges, then
+ * rename/delete for saved templates or a lock note for built-ins. */
 function Row({
   template,
   busy,
@@ -36,19 +37,18 @@ function Row({
       data-testid="manage-row"
       data-template-id={template.id}
       data-builtin={template.builtin}
-      className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800"
+      className="flex flex-wrap items-center gap-3 rounded-lg border border-border-subtle p-3 text-sm"
     >
-      <span className="min-w-40 flex-1 font-medium text-zinc-800 dark:text-zinc-100">
-        {template.name}
-      </span>
-      <span className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+      <TemplateThumb style={template.captionStyle} className="shrink-0" />
+      <span className="min-w-40 flex-1 font-medium text-text">{template.name}</span>
+      <span className="flex items-center gap-1.5 text-xs text-text-muted">
         <Swatch color={template.brandPrimary} />
         <Swatch color={template.brandSecondary} />
-        <span className="rounded bg-zinc-100 px-1 font-mono dark:bg-zinc-900">{template.aspectRatio}</span>
-        <span className="rounded bg-zinc-100 px-1 dark:bg-zinc-900">{template.captionPreset}</span>
+        <span className="rounded bg-surface-overlay px-1 font-mono">{template.aspectRatio}</span>
+        <span className="rounded bg-surface-overlay px-1">{template.captionPreset}</span>
       </span>
       {template.builtin ? (
-        <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+        <span className="rounded bg-surface-overlay px-1.5 py-0.5 font-mono text-[10px] uppercase text-text-muted">
           built-in
         </span>
       ) : (
@@ -66,11 +66,10 @@ function Row({
 }
 
 /**
- * The template manage list (Phase 09). Renders every template; built-ins are
- * shown read-only (locked), saved templates get Rename (PATCH) and Delete
- * (DELETE) which refresh the server component on success. All mutation rules
- * (built-in protection) are enforced server-side too — this UI only hides the
- * controls.
+ * The template manage list (Phase 09): every template with a live style preview;
+ * built-ins are read-only, saved templates get Rename (PATCH) and Delete (DELETE),
+ * both refreshing the server component on success. Built-in protection is enforced
+ * server-side too — this UI only hides the controls.
  */
 export function ManageList({ templates }: { templates: Template[] }) {
   const router = useRouter();
@@ -114,21 +113,15 @@ export function ManageList({ templates }: { templates: Template[] }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
+      {error ? <p className="text-sm text-danger">{error}</p> : null}
       {templates.length > 0 ? (
         <ul className="flex flex-col gap-2">
           {templates.map((t) => (
-            <Row
-              key={t.id}
-              template={t}
-              busy={busy}
-              onRename={() => rename(t)}
-              onDelete={() => remove(t)}
-            />
+            <Row key={t.id} template={t} busy={busy} onRename={() => rename(t)} onDelete={() => remove(t)} />
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">No templates yet.</p>
+        <p className="text-sm text-text-muted">No templates yet.</p>
       )}
     </div>
   );

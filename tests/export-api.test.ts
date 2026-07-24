@@ -244,7 +244,9 @@ describe("GET /api/exports/:id/download", () => {
     const res = await download(String(created.export.id));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("video/mp4");
-    expect(res.headers.get("content-disposition")).toContain(`${clipId}-tiktok.mp4`);
+    // Filename is derived from the clip title slug + preset id + aspect ratio,
+    // not the on-disk <clipId>-<preset>.mp4. The seeded clip title is "c".
+    expect(res.headers.get("content-disposition")).toContain("c-tiktok-9x16.mp4");
     expect(await res.text()).toBe("not-a-real-mp4-but-bytes");
   });
 

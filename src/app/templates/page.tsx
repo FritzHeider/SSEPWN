@@ -18,19 +18,17 @@ export default function TemplatesManagePage() {
   const savedCount = templates.filter((t) => !t.builtin).length;
 
   return (
-    <div className="flex flex-1 justify-center bg-zinc-50 px-6 py-12 font-sans dark:bg-black">
+    <div className="flex flex-1 justify-center bg-surface px-6 py-12 font-sans">
       <main className="flex w-full max-w-3xl flex-col gap-8">
         <header className="flex flex-col gap-2">
           <Link
             href="/"
-            className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+            className="w-fit rounded text-sm text-text-muted transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             ← Home
           </Link>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-            Templates
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <h1 className="text-2xl font-semibold tracking-tight text-text">Templates</h1>
+          <p className="text-sm text-text-muted">
             {templates.length} template{templates.length === 1 ? "" : "s"} · {savedCount} saved.
             Built-ins are read-only.
           </p>

@@ -62,6 +62,9 @@ test("full journey: upload → pipeline → caption edit → 9:16 → tiktok-bol
 
   // --- 3. Open the top clip editor ---------------------------------------------
   await page.goto(`/clips/${topClip.id}`);
+  // The two-pane editor is one region; its right pane is a tablist. The Captions
+  // tab is active by default, so the caption edit below needs no tab switch.
+  const editor = page.getByRole("region", { name: "Timeline editor" });
 
   // --- 3a. Edit a caption word (words come from the fake transcript) -----------
   const captions = page
@@ -70,7 +73,9 @@ test("full journey: upload → pipeline → caption edit → 9:16 → tiktok-bol
   const firstWord = page.getByTestId("caption-word").first();
   await expect(firstWord).toBeVisible();
   await firstWord.click();
-  const wordInput = captions.getByRole("textbox");
+  // Not getByRole("textbox"): the tab section also hosts the style panel's two
+  // color inputs, which are textboxes to the a11y tree — the testid is exact.
+  const wordInput = captions.getByTestId("caption-word-input");
   await expect(wordInput).toBeVisible();
   await wordInput.fill("sseclone");
   await wordInput.press("Enter");
@@ -79,6 +84,9 @@ test("full journey: upload → pipeline → caption edit → 9:16 → tiktok-bol
   await expect(page.getByTestId("caption-word").filter({ hasText: "sseclone" })).toHaveCount(1);
 
   // --- 3b. Switch the crop to 9:16, then drag a reframe keyframe ---------------
+  // The crop controls live on the Crop tab; the draggable rectangle is composited
+  // on the single shared player in the left pane when that tab is active.
+  await editor.getByTestId("editor-tab-crop").click();
   const aspect = page.getByRole("group", { name: "Aspect ratio" });
   const vertical = aspect.getByRole("button", { name: "9:16" });
   await vertical.click();
@@ -88,8 +96,7 @@ test("full journey: upload → pipeline → caption edit → 9:16 → tiktok-bol
   // render a 9:16 crop without the opt-in Human face models (auto smart-crop needs
   // them; a manual keyframe does not) — and every clip that carries a 9:16 crop
   // needs at least one keyframe for the render's cropFilter.
-  const cropSection = page.locator("section").filter({ has: page.getByRole("heading", { name: "Crop" }) });
-  const cropVideo = cropSection.locator("video").first();
+  const cropVideo = editor.locator("video").first();
   await expect
     .poll(() => cropVideo.evaluate((v: HTMLVideoElement) => v.readyState))
     .toBeGreaterThan(0);
@@ -116,6 +123,7 @@ test("full journey: upload → pipeline → caption edit → 9:16 → tiktok-bol
     .toBe(true);
 
   // --- 3c. Apply the built-in tiktok-bold template -----------------------------
+  await editor.getByTestId("editor-tab-template").click();
   const card = page.getByTestId("template-card").filter({ hasText: "TikTok Bold" });
   await expect(card).toHaveCount(1);
   await card.getByTestId("apply-template").click();
@@ -155,6 +163,7 @@ test("full journey: upload → pipeline → caption edit → 9:16 → tiktok-bol
     .toBe(1);
 
   // --- 3e. Export a draft tiktok clip; the worker renders it -------------------
+  await editor.getByTestId("editor-tab-export").click();
   const exportPanel = page.getByRole("region", { name: "Export" });
   await exportPanel.getByTestId("export-preset").selectOption("tiktok");
   await exportPanel.getByTestId("export-quality").selectOption("draft");

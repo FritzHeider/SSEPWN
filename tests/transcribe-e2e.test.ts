@@ -9,6 +9,7 @@ import { jobs, projects, transcripts } from "../src/lib/db/schema";
 import type { Job } from "../src/lib/jobs";
 import { createJobQueue } from "../src/lib/jobs";
 import type { TranscriptSegment } from "../src/lib/transcribe/types";
+import { createClipThumbnailHandler } from "../src/worker/handlers/clip-thumbnail";
 import { createGenerateClipsHandler } from "../src/worker/handlers/generate-clips";
 import { createIngestHandler } from "../src/worker/handlers/ingest";
 import { createTranscribeHandler } from "../src/worker/handlers/transcribe";
@@ -72,11 +73,14 @@ async function runQueuedJobs(): Promise<void> {
   // fake under NODE_ENV=test, via createTranscriber() — works end to end. An
   // injected fake here would test the wiring of the test, not of the product.
   const registry: Record<string, (ctx: { job: Job; db: typeof routeDb.db; setProgress: (n: number) => void }) => Promise<void>> = {
-    ingest: createIngestHandler({ dir: () => thumbDir }),
+    ingest: createIngestHandler({ dir: () => thumbDir, generateWaveformFn: async () => "" }),
     transcribe: createTranscribeHandler(),
     // Phase-04 extends the pipeline: transcribe hands off to generate-clips.
     // Drained with the real ffmpeg extractors so the full chain is exercised.
     "generate-clips": createGenerateClipsHandler(),
+    // generate-clips now queues a poster job per clip; stub the ffmpeg extraction
+    // so the drain completes without touching disk.
+    "clip-thumbnail": createClipThumbnailHandler({ generateThumbnailFn: async (_s, d) => d }),
   };
 
   for (let job = queue.claimNext(); job; job = queue.claimNext()) {
@@ -139,8 +143,11 @@ describe("upload → ingest → transcribe (TRANSCRIBER default, real upload ren
     expect(words[words.length - 1].end).toBeLessThanOrEqual(stored.duration ?? 0);
 
     const queued = routeDb.db.select().from(jobs).where(eq(jobs.projectId, project.id)).all();
-    // The full phase-04 pipeline: ingest → transcribe → generate-clips.
-    expect(queued.map((job) => job.type)).toEqual(["ingest", "transcribe", "generate-clips"]);
+    // The full pipeline: ingest → transcribe → generate-clips, then a
+    // clip-thumbnail job per generated clip (phase-BE task 4).
+    const pipelineTypes = queued.map((job) => job.type).filter((type) => type !== "clip-thumbnail");
+    expect(pipelineTypes).toEqual(["ingest", "transcribe", "generate-clips"]);
+    expect(queued.some((job) => job.type === "clip-thumbnail")).toBe(true);
     expect(queued.every((job) => job.status === "done")).toBe(true);
   }, 60_000);
 

@@ -10,6 +10,7 @@
  */
 
 import { resolvePlatformPreset } from "@/lib/presets";
+import { slugify } from "@/lib/slug";
 
 /** The `exports.status` lifecycle the worker drives (schema.ts). */
 export const EXPORT_STATUSES = ["queued", "running", "done", "failed"] as const;
@@ -116,6 +117,49 @@ export function exportQualityLabel(quality: string): string {
     default:
       return quality.trim() || "Final";
   }
+}
+
+/** The output pixel dimensions for a preset id (falls back to the default
+ * preset for an unknown id, so callers always get a size). */
+export function exportPresetDimensions(presetId: string): { width: number; height: number } {
+  const preset = resolvePlatformPreset(presetId);
+  return { width: preset.width, height: preset.height };
+}
+
+/** Binary units for {@link formatBytes}, ascending. */
+const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
+
+/**
+ * A human-readable file size like `"12.4 MB"` (item 29). Uses 1024-based units
+ * and one decimal place for KB and up (whole bytes read as plain integers, e.g.
+ * `"512 B"`). Non-finite or negative input reads as `"—"` so an absent size never
+ * renders `NaN`. Trailing `.0` is dropped so `1.0 MB` reads `1 MB`.
+ */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const rounded = Math.round(value * 10) / 10;
+  const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  return `${text} ${BYTE_UNITS[unit]}`;
+}
+
+/**
+ * The download filename for a finished export: the clip title as a slug, the
+ * preset id, and the aspect ratio with `:` written `x` — e.g.
+ * `my-clip-tiktok-9x16.mp4`. An empty/untitled clip slugs to `clip`, so the name
+ * is always non-empty and filesystem-safe (shared slug helper).
+ */
+export function exportFilename(title: string | null | undefined, presetId: string): string {
+  const preset = resolvePlatformPreset(presetId);
+  const base = slugify(title ?? "") || "clip";
+  const ratio = preset.aspectRatio.replace(":", "x");
+  return `${base}-${preset.id}-${ratio}.mp4`;
 }
 
 /**

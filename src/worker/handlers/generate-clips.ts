@@ -1,6 +1,9 @@
+import { rmSync } from "node:fs";
+
 import { and, eq } from "drizzle-orm";
 
 import { clips, projects, transcripts } from "../../lib/db/schema";
+import { clipThumbnailPath } from "../../lib/media/derived";
 import {
   mergeConfig,
   parseClipConfig,
@@ -11,6 +14,7 @@ import { fallbackCandidates, wholeVideoCandidate } from "../../lib/highlights/fa
 import { scoreWindows, type Candidate, type ScoreWindowsOptions } from "../../lib/highlights/score";
 import { selectClips } from "../../lib/highlights/select";
 import { snapBoundaries } from "../../lib/highlights/snap";
+import { createJobQueue } from "../../lib/jobs";
 import type { TranscriptSegment } from "../../lib/transcribe/types";
 import type { JobHandler, JobContext } from "./index";
 
@@ -146,7 +150,8 @@ export function createGenerateClipsHandler(
     // A source shorter than one minimum clip can't be cut — the whole video
     // becomes a single clip, and there is no signal extraction to do.
     if (project.duration !== null && project.duration > 0 && project.duration < cfg.minLen) {
-      persistClips(db, project.id, [wholeVideoCandidate(project.duration)], segments, cfg.hookPhrases);
+      const ids = persistClips(db, project.id, [wholeVideoCandidate(project.duration)], segments, cfg.hookPhrases);
+      enqueueClipThumbnails(db, project.id, ids);
       return;
     }
 
@@ -193,14 +198,31 @@ export function createGenerateClipsHandler(
     }
 
     setProgress(85);
-    persistClips(db, project.id, selected, segments, cfg.hookPhrases);
+    const ids = persistClips(db, project.id, selected, segments, cfg.hookPhrases);
+    enqueueClipThumbnails(db, project.id, ids);
   };
+}
+
+/**
+ * Queue a `clip-thumbnail` job per newly-created clip. Called AFTER `persistClips`
+ * commits — never inside the transaction, so a rolled-back insert can't leave a
+ * thumbnail job pointing at a clip row that never existed (mirrors the
+ * enqueue-after-commit rule in the transcribe/ingest handlers).
+ */
+function enqueueClipThumbnails(db: JobContext["db"], projectId: number, clipIds: number[]): void {
+  const queue = createJobQueue(db);
+  for (const clipId of clipIds) {
+    queue.enqueue("clip-thumbnail", projectId, { clipId });
+  }
 }
 
 /**
  * Replace a project's `candidate` clips with `selected`, in one transaction so a
  * regenerate swaps the set atomically — the clips panel never sees a half-written
  * mix of old and new. `candidate` only: manual clips are the user's, not ours.
+ *
+ * Returns the ids of the inserted clips so the caller can queue a thumbnail job
+ * per clip AFTER this transaction commits.
  */
 function persistClips(
   db: JobContext["db"],
@@ -208,13 +230,25 @@ function persistClips(
   selected: Candidate[],
   segments: TranscriptSegment[],
   hookPhrases: readonly string[],
-): void {
-  db.transaction((tx) => {
+): number[] {
+  // The candidate rows about to be replaced own poster files keyed by their id;
+  // the new rows get fresh ids, so those posters would orphan on disk. Collect
+  // them before the swap and unlink after it commits (best-effort).
+  const replacedIds = db
+    .select({ id: clips.id })
+    .from(clips)
+    .where(and(eq(clips.projectId, projectId), eq(clips.status, "candidate")))
+    .all()
+    .map((row) => row.id);
+
+  const ids = db.transaction((tx) => {
     tx.delete(clips)
       .where(and(eq(clips.projectId, projectId), eq(clips.status, "candidate")))
       .run();
+    const ids: number[] = [];
     for (const clip of selected) {
-      tx.insert(clips)
+      const [inserted] = tx
+        .insert(clips)
         .values({
           projectId,
           inPoint: clip.start,
@@ -224,7 +258,18 @@ function persistClips(
           reasons: JSON.stringify(clip.reasons),
           status: "candidate",
         })
-        .run();
+        .returning({ id: clips.id })
+        .all();
+      ids.push(inserted.id);
     }
+    return ids;
   });
+
+  // Drop the replaced clips' posters now that the swap is committed. Best-effort:
+  // a missing file (never postered, already cleaned) is fine.
+  for (const oldId of replacedIds) {
+    rmSync(clipThumbnailPath(oldId), { force: true });
+  }
+
+  return ids;
 }

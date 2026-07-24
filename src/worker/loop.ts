@@ -17,6 +17,13 @@ export interface WorkerOptions {
    * from a crashed worker and recovered. Defaults to the queue's own default.
    */
   staleJobMs?: number;
+  /**
+   * Called once at the top of every poll iteration (phase-BE task 1): the worker
+   * uses it to refresh its heartbeat file so `/api/health` can tell it is alive.
+   * Injected rather than done here so the loop stays free of fs concerns and
+   * tests need not touch disk. Its failures are swallowed by the caller.
+   */
+  heartbeat?: () => void;
   logger?: WorkerLogger;
 }
 
@@ -62,7 +69,7 @@ function createSleeper(): Sleeper {
  * queue's claim is a single atomic UPDATE, so no two workers get the same job.
  */
 export function createWorker(options: WorkerOptions): Worker {
-  const { queue, db, handlers, pollMs = 500, staleJobMs } = options;
+  const { queue, db, handlers, pollMs = 500, staleJobMs, heartbeat } = options;
   const logger: WorkerLogger = options.logger ?? {
     log: (message) => console.log(message),
     error: (message) => console.error(message),
@@ -107,6 +114,8 @@ export function createWorker(options: WorkerOptions): Worker {
     }
     logger.log(`[worker] polling every ${pollMs}ms`);
     while (!stopping) {
+      // Refresh the liveness heartbeat every iteration, before doing any work.
+      heartbeat?.();
       const job = queue.claimNext();
       if (!job) {
         await sleeper.sleep(pollMs);

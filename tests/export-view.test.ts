@@ -6,7 +6,10 @@ import {
   clampProgress,
   exportDownloadUrl,
   exportErrorMessage,
+  exportFilename,
+  exportPresetDimensions,
   exportPresetLabel,
+  formatBytes,
   exportQualityLabel,
   exportStatusLabel,
   isTerminalExport,
@@ -166,5 +169,51 @@ describe("exportErrorMessage", () => {
     const out = exportErrorMessage(long, 100);
     expect(out).toHaveLength(100);
     expect(out?.endsWith("…")).toBe(true);
+  });
+});
+
+describe("exportPresetDimensions", () => {
+  it("returns the preset's output resolution", () => {
+    expect(exportPresetDimensions("tiktok")).toEqual({ width: 1080, height: 1920 });
+    expect(exportPresetDimensions("landscape")).toEqual({ width: 1920, height: 1080 });
+  });
+
+  it("falls back to the default preset for an unknown id", () => {
+    expect(exportPresetDimensions("myspace")).toEqual({ width: 1080, height: 1920 });
+  });
+});
+
+describe("formatBytes", () => {
+  it("reads whole bytes as plain integers", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(1023)).toBe("1023 B");
+  });
+
+  it("uses 1024-based KB/MB/GB with one decimal, dropping trailing .0", () => {
+    expect(formatBytes(1024)).toBe("1 KB");
+    expect(formatBytes(1536)).toBe("1.5 KB");
+    expect(formatBytes(13_000_000)).toBe("12.4 MB");
+    expect(formatBytes(1024 * 1024 * 1024)).toBe("1 GB");
+  });
+
+  it("reads absent or invalid sizes as an em dash", () => {
+    expect(formatBytes(null)).toBe("—");
+    expect(formatBytes(undefined)).toBe("—");
+    expect(formatBytes(-5)).toBe("—");
+    expect(formatBytes(Number.NaN)).toBe("—");
+  });
+});
+
+describe("exportFilename", () => {
+  it("composes title slug + preset id + aspect ratio", () => {
+    expect(exportFilename("My Clip", "tiktok")).toBe("my-clip-tiktok-9x16.mp4");
+    expect(exportFilename("Wide One", "landscape")).toBe("wide-one-landscape-16x9.mp4");
+  });
+
+  it("falls back to `clip` for an empty or unsluggable title", () => {
+    expect(exportFilename("", "square")).toBe("clip-square-1x1.mp4");
+    expect(exportFilename(null, "tiktok")).toBe("clip-tiktok-9x16.mp4");
+    expect(exportFilename("!!!", "tiktok")).toBe("clip-tiktok-9x16.mp4");
   });
 });

@@ -1,77 +1,100 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Download, RefreshCw, Trash2 } from "lucide-react";
+import { useCallback, useState } from "react";
 
+import { ClipCard } from "./clip-card";
+import { ClipCardSkeletons } from "./skeletons";
+import { useToast } from "@/app/_components/toaster";
 import type { ProjectClip } from "@/lib/projects/clips";
-import {
-  clipDurationLabel,
-  clipRangeLabel,
-  clipScoreLabel,
-  clipTitle,
-  clipsEmptyMessage,
-  manualRangeError,
-} from "@/lib/projects/clips-panel";
+import { clipsEmptyMessage, manualRangeError } from "@/lib/projects/clips-panel";
+import { maxClipScore } from "@/lib/projects/score-bar";
 import { formatDuration } from "@/lib/projects/view";
+import { DEFAULT_PLATFORM_PRESET, PLATFORM_PRESET_LIST, type PlatformPresetId } from "@/lib/presets";
 
-/** How many times, and how far apart, regenerate polls for the worker's output. */
-const POLL_TRIES = 12;
-const POLL_INTERVAL_MS = 1500;
+const JSON_HEADERS = { "Content-Type": "application/json" };
 
 /**
- * The clips panel: ranked cards over a shared player.
+ * The clips panel: ranked cards over the shared player. Clip list state and the
+ * SSE-driven refetch live in the workspace; this panel owns the per-clip
+ * mutations (manual add, rename, export) and batch selection, mutating the
+ * shared list through `setClips` so a change shows immediately, with SSE
+ * reconciling order afterward.
  *
- * Presentation-only decisions (how a range reads, when Add is allowed) come from
- * `lib/projects/clips-panel.ts`; this component owns the network + local list so
- * a mutation shows immediately without a full page reload. Every mutation
- * re-reads `GET /clips` rather than patching the array in place, so the card
- * order always matches the server's ranking (`listClips`) — the one authority on
- * "best first" that the API and the server render already share.
- *
- * `onPreview` and `getCurrentTime` are the only ties to the video element, which
- * the parent workspace owns: clicking a card asks the player to run the range,
- * and Mark in/out read the live playhead. The panel never touches the <video>.
+ * Deletes (single and batch) go through the workspace's undoable-delete flow;
+ * `onReasonClick` links a card's reason chip into the transcript; "Export all"
+ * and batch export both point at the exports drawer via `onOpenExports`.
  */
 export function ClipsPanel({
   projectId,
   duration,
-  generationComplete = false,
-  initialClips,
-  onPreview,
+  generationComplete,
+  clips,
+  setClips,
+  loading,
+  markIn,
+  markOut,
+  setMarkIn,
+  setMarkOut,
   getCurrentTime,
+  regenerating,
+  onRegenerate,
+  onPreview,
+  onReasonClick,
+  onDelete,
+  onDeleteMany,
+  onOpenExports,
+  thumbVersion,
 }: {
   projectId: number;
   duration: number | null;
-  /** True once generate-clips has run: an empty list then offers manual clipping. */
-  generationComplete?: boolean;
-  initialClips: ProjectClip[];
-  onPreview: (inPoint: number, outPoint: number) => void;
+  generationComplete: boolean;
+  clips: ProjectClip[];
+  setClips: (updater: (current: ProjectClip[]) => ProjectClip[]) => void;
+  /** True while generate-clips is in flight and there are no clips yet. */
+  loading: boolean;
+  markIn: number | null;
+  markOut: number | null;
+  setMarkIn: (seconds: number | null) => void;
+  setMarkOut: (seconds: number | null) => void;
   getCurrentTime: () => number;
+  regenerating: boolean;
+  onRegenerate: () => void;
+  onPreview: (inPoint: number, outPoint: number) => void;
+  onReasonClick: (clip: ProjectClip) => void;
+  onDelete: (clip: ProjectClip) => void;
+  onDeleteMany: (clips: ProjectClip[]) => void;
+  onOpenExports: () => void;
+  thumbVersion: number;
 }) {
-  const [clips, setClips] = useState<ProjectClip[]>(initialClips);
-  const [markIn, setMarkIn] = useState<number | null>(null);
-  const [markOut, setMarkOut] = useState<number | null>(null);
+  const { toast } = useToast();
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkPreset, setBulkPreset] = useState<PlatformPresetId>(DEFAULT_PLATFORM_PRESET);
   const [busy, setBusy] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Guards the async poll and any late fetch from setting state after unmount.
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
+  const maxScore = maxClipScore(clips);
+  const rangeError = manualRangeError(markIn, markOut, duration);
+  const emptyMessage = clipsEmptyMessage(clips, generationComplete);
+  const selectedClips = clips.filter((clip) => selected.has(clip.id));
+  const allSelected = clips.length > 0 && selected.size === clips.length;
+
+  const toggleSelect = useCallback((id: number) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }, []);
 
-  const refresh = useCallback(async () => {
-    const response = await fetch(`/api/projects/${projectId}/clips`, { cache: "no-store" });
-    if (!response.ok) throw new Error(`Could not load clips (${response.status})`);
-    const body = (await response.json()) as { clips: ProjectClip[] };
-    if (alive.current) setClips(body.clips);
-  }, [projectId]);
+  const toggleAll = useCallback(() => {
+    setSelected((current) => (current.size === clips.length ? new Set() : new Set(clips.map((c) => c.id))));
+  }, [clips]);
+
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
 
   const addClip = useCallback(async () => {
     if (manualRangeError(markIn, markOut, duration) !== null) return;
@@ -80,234 +103,236 @@ export function ClipsPanel({
     try {
       const response = await fetch(`/api/projects/${projectId}/clips`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: JSON_HEADERS,
         body: JSON.stringify({ inPoint: markIn, outPoint: markOut }),
       });
       if (!response.ok) throw new Error(`Add failed (${response.status})`);
-      await refresh();
-      if (alive.current) {
-        setMarkIn(null);
-        setMarkOut(null);
-      }
+      const body = (await response.json()) as { clip: ProjectClip };
+      setClips((current) => [...current, body.clip]);
+      setMarkIn(null);
+      setMarkOut(null);
     } catch (cause) {
-      if (alive.current) setError(cause instanceof Error ? cause.message : "Add failed");
+      setError(cause instanceof Error ? cause.message : "Add failed");
     } finally {
-      if (alive.current) setBusy(false);
+      setBusy(false);
     }
-  }, [markIn, markOut, duration, projectId, refresh]);
+  }, [markIn, markOut, duration, projectId, setClips, setMarkIn, setMarkOut]);
 
-  const deleteClip = useCallback(
-    async (id: number) => {
-      setBusy(true);
-      setError(null);
+  const rename = useCallback(
+    async (id: number, title: string): Promise<boolean> => {
       try {
-        const response = await fetch(`/api/clips/${id}`, { method: "DELETE" });
-        if (!response.ok) throw new Error(`Delete failed (${response.status})`);
-        await refresh();
-      } catch (cause) {
-        if (alive.current) setError(cause instanceof Error ? cause.message : "Delete failed");
-      } finally {
-        if (alive.current) setBusy(false);
+        const response = await fetch(`/api/clips/${id}`, {
+          method: "PATCH",
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ title }),
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        // The PATCH returns a raw DB row (reasons as JSON text); merge only the
+        // title so the parsed `reasons: string[]` already in state survives.
+        const body = (await response.json()) as { clip: { title: string | null } };
+        setClips((current) => current.map((c) => (c.id === id ? { ...c, title: body.clip.title } : c)));
+        return true;
+      } catch {
+        toast({ title: "Rename failed", variant: "danger" });
+        return false;
       }
     },
-    [refresh],
+    [setClips, toast],
   );
 
-  const regenerate = useCallback(async () => {
-    setRegenerating(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/projects/${projectId}/regenerate-clips`, { method: "POST" });
-      if (!response.ok) throw new Error(`Regenerate failed (${response.status})`);
-      // The job runs in the worker, not here (global constraint), so the new
-      // clips land asynchronously. Poll a bounded number of times, then stop —
-      // a worker that is down must not spin this forever.
-      for (let attempt = 0; attempt < POLL_TRIES && alive.current; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-        if (!alive.current) return;
-        await refresh();
-      }
-    } catch (cause) {
-      if (alive.current) setError(cause instanceof Error ? cause.message : "Regenerate failed");
-    } finally {
-      if (alive.current) setRegenerating(false);
-    }
-  }, [projectId, refresh]);
-
-  // Batch "export all clips": queue one export job per clip (the worker renders
-  // them sequentially). Each POST uses the clip's own effective preset and final
-  // quality; per-clip progress and downloads live on each clip's editor page.
-  const exportAll = useCallback(async () => {
-    setExporting(true);
-    setError(null);
-    setNotice(null);
-    try {
+  const queueExports = useCallback(
+    async (targets: ProjectClip[], preset?: PlatformPresetId): Promise<{ queued: number; failed: number }> => {
       let queued = 0;
       let failed = 0;
-      for (const clip of clips) {
-        try {
-          const response = await fetch(`/api/clips/${clip.id}/export`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
-          });
-          if (response.ok) queued += 1;
-          else failed += 1;
-        } catch {
-          failed += 1;
-        }
-      }
-      if (!alive.current) return;
-      setNotice(
-        `Queued ${queued} export${queued === 1 ? "" : "s"}` +
-          (failed > 0 ? ` (${failed} failed to queue)` : "") +
-          ". Open a clip to track progress and download.",
+      await Promise.all(
+        targets.map(async (clip) => {
+          try {
+            const response = await fetch(`/api/clips/${clip.id}/export`, {
+              method: "POST",
+              headers: JSON_HEADERS,
+              body: JSON.stringify(preset ? { preset } : {}),
+            });
+            if (response.ok) queued += 1;
+            else failed += 1;
+          } catch {
+            failed += 1;
+          }
+        }),
       );
-    } finally {
-      if (alive.current) setExporting(false);
-    }
-  }, [clips]);
+      return { queued, failed };
+    },
+    [],
+  );
 
-  const rangeError = manualRangeError(markIn, markOut, duration);
-  const emptyMessage = clipsEmptyMessage(clips, generationComplete);
+  const exportAll = useCallback(async () => {
+    setExporting(true);
+    setNotice(null);
+    const { queued, failed } = await queueExports(clips);
+    setExporting(false);
+    onOpenExports();
+    setNotice(`Queued ${queued} export${queued === 1 ? "" : "s"}${failed > 0 ? ` (${failed} failed)` : ""}. Track them under Exports below.`);
+  }, [clips, queueExports, onOpenExports]);
+
+  const exportSelected = useCallback(async () => {
+    const targets = selectedClips;
+    const { queued, failed } = await queueExports(targets, bulkPreset);
+    clearSelection();
+    onOpenExports();
+    toast({
+      title: `Queued ${queued} export${queued === 1 ? "" : "s"}`,
+      description: failed > 0 ? `${failed} failed to queue.` : undefined,
+      variant: failed > 0 ? "danger" : "success",
+    });
+  }, [selectedClips, bulkPreset, queueExports, clearSelection, onOpenExports, toast]);
+
+  const deleteSelected = useCallback(() => {
+    onDeleteMany(selectedClips);
+    clearSelection();
+  }, [selectedClips, onDeleteMany, clearSelection]);
 
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          Clips
-        </h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">Clips</h2>
         <div className="flex items-center gap-2">
+          {clips.length > 0 ? (
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-[var(--text-muted)]">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                className="h-4 w-4 cursor-pointer accent-[var(--accent)]"
+              />
+              Select all
+            </label>
+          ) : null}
           <button
             type="button"
             data-testid="export-all"
             onClick={exportAll}
             disabled={exporting || busy || clips.length === 0}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] px-3 text-xs font-medium text-[var(--text)] transition-colors hover:bg-[var(--surface-overlay)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
+            <Download className="h-3.5 w-3.5" aria-hidden />
             {exporting ? "Queuing…" : "Export all"}
           </button>
           <button
             type="button"
-            onClick={regenerate}
+            onClick={onRegenerate}
             disabled={regenerating || busy}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] px-3 text-xs font-medium text-[var(--text)] transition-colors hover:bg-[var(--surface-overlay)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
+            <RefreshCw className={`h-3.5 w-3.5 ${regenerating ? "animate-spin" : ""}`} aria-hidden />
             {regenerating ? "Regenerating…" : "Regenerate"}
           </button>
         </div>
       </div>
 
       {notice ? (
-        <p data-testid="export-all-notice" className="text-sm text-emerald-700 dark:text-emerald-400">
+        <p data-testid="export-all-notice" role="status" className="text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
 
-      {/* Manual "add clip from current selection": mark the range off the live
-          playhead, then commit it. */}
-      <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+      {selected.size > 0 ? (
+        <div
+          data-testid="bulk-bar"
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] p-2.5"
+        >
+          <span className="text-sm font-medium text-[var(--text)]">{selected.size} selected</span>
+          <select
+            value={bulkPreset}
+            onChange={(event) => setBulkPreset(event.target.value as PlatformPresetId)}
+            aria-label="Export preset"
+            className="ml-auto h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
+            {PLATFORM_PRESET_LIST.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={exportSelected}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-[var(--accent-contrast)] transition-colors hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden />
+            Export {selected.size}
+          </button>
+          <button
+            type="button"
+            onClick={deleteSelected}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] px-3 text-xs font-medium text-[var(--danger)] transition-colors hover:bg-[color-mix(in_oklab,var(--danger)_14%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+            Delete {selected.size}
+          </button>
+        </div>
+      ) : null}
+
+      {/* Manual "add clip from selection": marks come from the seekbar handles or
+          the buttons below, both bound to the shared mark-in/out state. */}
+      <div className="flex flex-col gap-2 rounded-lg border border-[var(--border-subtle)] p-3">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <button
             type="button"
             onClick={() => setMarkIn(getCurrentTime())}
-            className="rounded-md bg-zinc-100 px-2.5 py-1 font-medium text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+            className="rounded-md bg-[var(--surface-overlay)] px-2.5 py-1 font-medium text-[var(--text)] transition-colors hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
             Mark in
           </button>
           <button
             type="button"
             onClick={() => setMarkOut(getCurrentTime())}
-            className="rounded-md bg-zinc-100 px-2.5 py-1 font-medium text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+            className="rounded-md bg-[var(--surface-overlay)] px-2.5 py-1 font-medium text-[var(--text)] transition-colors hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
             Mark out
           </button>
-          <span className="font-mono tabular-nums text-zinc-500 dark:text-zinc-400">
+          <span className="font-mono tabular-nums text-[var(--text-muted)]">
             {markIn === null ? "—" : formatDuration(markIn)} → {markOut === null ? "—" : formatDuration(markOut)}
           </span>
           <button
             type="button"
             onClick={addClip}
             disabled={rangeError !== null || busy}
-            className="ml-auto rounded-md bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="ml-auto rounded-md bg-[var(--accent)] px-2.5 py-1 font-medium text-[var(--accent-contrast)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
             Add clip
           </button>
         </div>
         {rangeError !== null && (markIn !== null || markOut !== null) ? (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">{rangeError}</p>
+          <p className="text-xs text-[var(--text-muted)]">{rangeError}</p>
         ) : null}
       </div>
 
-      {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
 
-      {emptyMessage ? (
-        <p
-          data-testid="clips-empty"
-          className="rounded-lg border border-zinc-200 p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400"
-        >
+      {clips.length === 0 && loading ? (
+        <ClipCardSkeletons />
+      ) : emptyMessage ? (
+        <p data-testid="clips-empty" className="rounded-lg border border-[var(--border-subtle)] p-6 text-sm text-[var(--text-muted)]">
           {emptyMessage}
         </p>
       ) : (
         <ol className="flex flex-col gap-2">
-          {clips.map((clip, index) => {
-            const score = clipScoreLabel(clip);
-            return (
-              <li key={clip.id}>
-                <div className="flex items-start gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-                  <button
-                    type="button"
-                    onClick={() => onPreview(clip.inPoint, clip.outPoint)}
-                    className="flex flex-1 flex-col gap-1.5 text-left"
-                  >
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-mono text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
-                        #{index + 1}
-                      </span>
-                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                        {clipTitle(clip)}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                      <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono tabular-nums dark:bg-zinc-800">
-                        {score === null ? "Manual" : `score ${score}`}
-                      </span>
-                      <span className="font-mono tabular-nums">{clipDurationLabel(clip)}</span>
-                      <span className="font-mono tabular-nums">{clipRangeLabel(clip)}</span>
-                    </div>
-                    {clip.reasons.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {clip.reasons.map((reason, r) => (
-                          <span
-                            key={r}
-                            className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
-                          >
-                            {reason}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </button>
-                  <Link
-                    href={`/clips/${clip.id}`}
-                    aria-label={`Edit captions for ${clipTitle(clip)}`}
-                    className="shrink-0 rounded-md px-2 py-1 text-xs text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                  >
-                    Captions
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => deleteClip(clip.id)}
-                    disabled={busy}
-                    aria-label={`Delete ${clipTitle(clip)}`}
-                    className="shrink-0 rounded-md px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            );
-          })}
+          {clips.map((clip, index) => (
+            <li key={clip.id}>
+              <ClipCard
+                clip={clip}
+                rank={index + 1}
+                maxScore={maxScore}
+                thumbVersion={thumbVersion}
+                selected={selected.has(clip.id)}
+                onToggleSelect={toggleSelect}
+                onPreview={onPreview}
+                onRename={rename}
+                onDelete={onDelete}
+                onReasonClick={onReasonClick}
+                disabled={busy}
+              />
+            </li>
+          ))}
         </ol>
       )}
     </section>

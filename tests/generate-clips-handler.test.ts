@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { clips, projects, transcripts } from "../src/lib/db/schema";
+import { clips, jobs, projects, transcripts } from "../src/lib/db/schema";
 import { audioEnergy, sceneChanges } from "../src/lib/highlights/extractors";
 import { createJobQueue, type JobQueue } from "../src/lib/jobs";
 import type { TranscriptSegment } from "../src/lib/transcribe/types";
@@ -81,12 +81,31 @@ describe("generate-clips handler", () => {
       audioEnergyFn: signals?.energy ?? (async () => flatEnergy()),
       sceneChangesFn: signals?.scenes ?? (async () => []),
     });
-    const enqueued = queue.enqueue("generate-clips", projectId, payload);
-    const job = queue.claimNext();
-    if (!job || job.id !== enqueued.id) throw new Error("failed to claim generate-clips job");
+    // Run the handler on the enqueued job directly rather than `claimNext()`: the
+    // handler now enqueues a `clip-thumbnail` job per created clip, so after the
+    // first run the queue also holds those, and "the next job" is no longer
+    // guaranteed to be this generate-clips job.
+    const job = queue.enqueue("generate-clips", projectId, payload);
     await handler({ job, db: testDb.db, setProgress: () => {} });
     return testDb.db.select().from(clips).where(eq(clips.projectId, projectId)).all();
   }
+
+  it("enqueues a clip-thumbnail job for each created clip", async () => {
+    const id = seedTranscribedProject();
+    const rows = await run(id, { windowLen: 15, count: 5 });
+
+    const thumbJobs = testDb.db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.type, "clip-thumbnail"))
+      .all();
+    // One thumbnail job per persisted clip, each carrying that clip's id.
+    expect(thumbJobs).toHaveLength(rows.length);
+    const jobClipIds = thumbJobs.map((j) => (JSON.parse(j.payload ?? "{}") as { clipId: number }).clipId).sort();
+    expect(jobClipIds).toEqual(rows.map((r) => r.id).sort((a, b) => a - b));
+    // All queued on the clip's own project.
+    for (const j of thumbJobs) expect(j.projectId).toBe(id);
+  });
 
   it("writes ranked candidate clips with score, reasons, and an auto title", async () => {
     const id = seedTranscribedProject();

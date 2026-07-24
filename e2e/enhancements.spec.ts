@@ -37,11 +37,16 @@ test("place a B-roll slot and a CTA, both persist across reload and render in pr
 
   const timeline = page.getByRole("region", { name: "Timeline editor" });
   await expect(timeline.getByTestId("timeline-segment")).toHaveCount(1);
-  // Wait for the source `<video>` to load metadata so the preview frame has a
+  // Wait for the shared `<video>` to load metadata so the preview frame has a
   // real height — the overlays are `absolute inset-0`, so an unsized frame would
   // give them a zero box and defeat the visibility checks below.
   const video = timeline.locator("video").first();
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThan(0);
+
+  // The two-pane editor hosts the B-roll / CTA / SFX editors on the Timeline tab
+  // of the right pane; switch to it before driving those panels. The shared player
+  // and its overlays live in the always-visible left pane.
+  await timeline.getByTestId("editor-tab-timeline").click();
 
   // --- place a B-roll slot from the asset library ---------------------------
   const broll = timeline.getByRole("region", { name: "B-roll" });
@@ -78,6 +83,8 @@ test("place a B-roll slot and a CTA, both persist across reload and render in pr
 
   // --- acceptance criterion: reload → both persist and re-render -------------
   await page.reload();
+  // The reload resets to the default tab; re-open the Timeline tab to read the rows.
+  await timeline.getByTestId("editor-tab-timeline").click();
   await expect(timeline.getByTestId("broll-row")).toHaveCount(1);
   await expect(timeline.getByTestId("cta-row")).toHaveCount(1);
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThan(0);

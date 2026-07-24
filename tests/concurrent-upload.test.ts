@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { clips, projects } from "../src/lib/db/schema";
 import { createJobQueue } from "../src/lib/jobs";
+import { createClipThumbnailHandler } from "../src/worker/handlers/clip-thumbnail";
 import { createGenerateClipsHandler } from "../src/worker/handlers/generate-clips";
 import { createIngestHandler } from "../src/worker/handlers/ingest";
 import { createTranscribeHandler } from "../src/worker/handlers/transcribe";
@@ -85,9 +86,12 @@ function pipelineWorker() {
     queue,
     db: routeDb.db,
     handlers: {
-      ingest: createIngestHandler({ dir: () => thumbDir }),
+      ingest: createIngestHandler({ dir: () => thumbDir, generateWaveformFn: async () => "" }),
       transcribe: createTranscribeHandler(),
       "generate-clips": createGenerateClipsHandler(),
+      // generate-clips now queues a poster job per clip; stub the ffmpeg
+      // extraction so the drain completes without real thumbnail work.
+      "clip-thumbnail": createClipThumbnailHandler({ generateThumbnailFn: async (_s, d) => d }),
     },
     pollMs: POLL_MS,
     logger: silentLogger,

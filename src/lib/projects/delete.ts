@@ -13,6 +13,7 @@ import {
   templates,
   transcripts,
 } from "@/lib/db/schema";
+import { clipThumbnailPath, waveformPath } from "@/lib/media/derived";
 
 /** Row counts removed per table — surfaced by the DELETE route and the test. */
 export interface DeleteProjectResult {
@@ -79,6 +80,11 @@ export function deleteProject(db: JobsDb, projectId: number): DeleteProjectResul
     project.thumbnailPath,
     ...assetRows.flatMap((asset) => [asset.path, asset.thumbnailPath]),
     ...exportRows.map((row) => row.outputPath),
+    // Derived media the worker generated for this project: one poster per clip
+    // and the project's waveform. Their paths are deterministic (not stored in a
+    // column), so recompute them; a missing file is a no-op under `force: true`.
+    ...clipIds.map((clipId) => clipThumbnailPath(clipId)),
+    waveformPath(projectId),
   ].filter((path): path is string => typeof path === "string" && path.length > 0);
 
   const count = (result: { changes: number }) => result.changes;

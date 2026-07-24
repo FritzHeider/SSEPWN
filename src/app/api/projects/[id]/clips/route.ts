@@ -6,6 +6,7 @@ import { apiError, invalidId as invalidIdResponse, notFound as notFoundResponse,
 import { parseId } from "@/lib/api/params";
 import { db } from "@/lib/db";
 import { clips, projects } from "@/lib/db/schema";
+import { createJobQueue } from "@/lib/jobs";
 import { listClips, type ProjectClip } from "@/lib/projects/clips";
 
 export const runtime = "nodejs";
@@ -94,6 +95,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .values({ projectId: id, inPoint, outPoint, title, status: "manual" })
     .returning()
     .all();
+
+  // Poster the new clip in the worker (all ffmpeg stays out of this request).
+  createJobQueue(db).enqueue("clip-thumbnail", id, { clipId: inserted.id });
 
   const clip: ProjectClip = {
     id: inserted.id,

@@ -1,14 +1,14 @@
 import { eq } from "drizzle-orm";
 import type { FileHandle } from "node:fs/promises";
 import { open } from "node:fs/promises";
-import path from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { NextResponse } from "next/server";
 
 import { parseId } from "@/lib/api/params";
 import { db } from "@/lib/db";
-import { exports } from "@/lib/db/schema";
+import { clips, exports } from "@/lib/db/schema";
+import { exportFilename } from "@/lib/export/view";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,7 +65,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     throw error;
   }
 
-  const filename = path.basename(row.outputPath);
+  // Name the download from the clip title + preset (e.g. my-clip-tiktok-9x16.mp4)
+  // rather than the on-disk `<clipId>-<preset>.mp4`, so a saved file is readable.
+  const clip = db.select({ title: clips.title }).from(clips).where(eq(clips.id, row.clipId)).get();
+  const filename = exportFilename(clip?.title ?? null, row.preset);
   // The stream closes the handle when it ends or the response is cancelled.
   const stream = Readable.toWeb(handle.createReadStream()) as unknown as WebReadableStream<Uint8Array>;
 

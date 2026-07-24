@@ -1,28 +1,100 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: `dark:` utilities key off a `.dark` ancestor rather
+ * than the OS `prefers-color-scheme`. The theme toggle swaps `dark`/`light` on
+ * <html> (see theme-toggle.tsx); dark is the default and is set statically in
+ * layout.tsx plus a pre-hydration script, so there is no flash and no fight
+ * with the OS setting. Every existing `dark:` utility keeps working unchanged. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Semantic design tokens. `:root` holds the DARK values — dark is the editor
+ * default. `.light` overrides flip the same names to a light palette. Muted
+ * text is tuned to clear WCAG 4.5:1 on both surface and surface-raised. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --surface: #0b0d12;
+  --surface-raised: #14161d;
+  --surface-overlay: #1c1f28;
+  --border-subtle: #262a33;
+  --text: #f4f4f5;
+  --text-muted: #9ca3af;
+  --accent: #ec4899;
+  --accent-contrast: #ffffff;
+  --timeline: #2563eb;
+  --danger: #dc2626;
+  --success: #059669;
+}
+
+.light {
+  --surface: #fafafa;
+  --surface-raised: #ffffff;
+  --surface-overlay: #ffffff;
+  --border-subtle: #e4e4e7;
+  --text: #18181b;
+  --text-muted: #52525b;
+  --accent: #ec4899;
+  --accent-contrast: #ffffff;
+  --timeline: #2563eb;
+  --danger: #dc2626;
+  --success: #059669;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  /* Legacy names kept so any `bg-background`/`text-foreground` still resolves. */
+  --color-background: var(--surface);
+  --color-foreground: var(--text);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-border-subtle: var(--border-subtle);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-timeline: var(--timeline);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background: var(--surface);
+  color: var(--text);
+  /* Geist Sans is loaded in layout.tsx; make it the real body face (the file
+   * previously fell back to Arial despite loading Geist). */
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+code,
+pre,
+kbd,
+samp,
+.font-mono {
+  font-family: var(--font-mono), ui-monospace, "SF Mono", Menlo, Consolas,
+    monospace;
+}
+
+/* Toast enter/exit — transform + opacity only (compositor-friendly). */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
 
 /* Phase-08 CTA overlay animations. The preview scrubs these to the exact frame
@@ -52,4 +124,19 @@ body {
 @keyframes cta-slide-out-down {
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(12%); }
+}
+
+/* Respect reduced-motion: kill transitions and decorative animations. `.cta-anim`
+ * is deliberately exempted — its "animation" is a still frame scrubbed to a fixed
+ * offset via a negative delay + paused play-state (cta-preview.tsx), so zeroing
+ * its duration would jump the preview to the wrong frame rather than calm motion. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.cta-anim),
+  *:not(.cta-anim)::before,
+  *:not(.cta-anim)::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

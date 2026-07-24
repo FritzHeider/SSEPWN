@@ -1,66 +1,164 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ClipsPanel } from "./clips-panel";
+import { ExportsDrawer } from "./exports-drawer";
+import { PipelineStepper } from "./pipeline-stepper";
+import { Seekbar } from "./seekbar";
+import { PosterSkeleton } from "./skeletons";
+import { TranscriptRail } from "./transcript-rail";
+import { useProjectStream } from "./use-project-stream";
+import { useUndoableDelete } from "./use-undoable-delete";
+import { useToast } from "@/app/_components/toaster";
+import { derivePipeline, type PipelineStep } from "@/lib/pipeline";
 import type { ProjectClip } from "@/lib/projects/clips";
-import { shouldPausePreview } from "@/lib/projects/clips-panel";
+import { clipTitle, shouldPausePreview } from "@/lib/projects/clips-panel";
+import { firstSegmentInRange } from "@/lib/projects/transcript-search";
 import type { ProjectTranscript } from "@/lib/projects/transcript";
 import {
   NO_ACTIVE_SEGMENT,
   activeSegmentIndex,
   captionsDisabledMessage,
   emptyTranscriptMessage,
-  formatTimestamp,
   sourceVideoUrl,
 } from "@/lib/transcribe/panel";
 
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
 /**
- * The project page's interactive half: one <video> shared by the transcript and
- * the clips panel.
- *
- * The video lives here, not inside either panel, because both need it and the
- * spec's clip preview is "in the player" — the same element the transcript seeks
- * (DEC-005 keeps the decisions in pure libs; this component only wires them to
- * the element). A transcript click seeks without playing ("show me this
- * moment"); a clip click seeks AND plays, then pauses itself at the out-point
- * via the element's own `timeupdate` clock, so the pause cannot drift from the
- * frame on screen.
+ * The project page's interactive half. Owns the shared <video>, the clip list
+ * (kept live off the SSE stream), and the mark-in/out state the seekbar handles
+ * and the clips panel's Mark buttons both drive. At xl+ it lays out two columns:
+ * a sticky player + clips on the left, a scrolling transcript rail on the right;
+ * below xl it stacks in the original order.
  */
 export function ProjectWorkspace({
   projectId,
   duration,
   hasAudio,
-  generationComplete,
+  projectStatus,
+  transcribed,
+  initialGenerationComplete,
+  initialSteps,
   transcript,
   initialClips,
 }: {
   projectId: number;
   duration: number | null;
-  /** null until the ingest probe runs; false disables captions with a reason. */
   hasAudio: boolean | null;
-  /** True once generate-clips has finished — drives the zero-highlight offer. */
-  generationComplete: boolean;
+  projectStatus: string;
+  transcribed: boolean;
+  initialGenerationComplete: boolean;
+  initialSteps: PipelineStep[];
   transcript: ProjectTranscript;
   initialClips: ProjectClip[];
 }) {
+  const { toast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
-  // Out-point a running preview should stop at, or null when free-playing. A ref
-  // so the timeupdate handler reads the latest target without re-binding.
   const previewOut = useRef<number | null>(null);
-  const [activeIndex, setActiveIndex] = useState(NO_ACTIVE_SEGMENT);
   const { segments } = transcript;
-  const emptyMessage = emptyTranscriptMessage(transcript);
-  const captionsDisabled = captionsDisabledMessage(hasAudio);
 
+  const [clips, setClips] = useState<ProjectClip[]>(initialClips);
+  const [markIn, setMarkIn] = useState<number | null>(null);
+  const [markOut, setMarkOut] = useState<number | null>(null);
+  const [activeIndex, setActiveIndex] = useState(NO_ACTIVE_SEGMENT);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [buffered, setBuffered] = useState(0);
+  const [videoReady, setVideoReady] = useState(false);
+  const [flash, setFlash] = useState({ index: -1, nonce: 0 });
+  const [exportsOpen, setExportsOpen] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+
+  const regenPrevGenIds = useRef<Set<number>>(new Set());
+  const regenStartRevision = useRef(0);
+
+  const stream = useProjectStream(projectId);
+  const { removeOne, removeMany, getPendingIds } = useUndoableDelete<ProjectClip>({
+    setList: setClips,
+    deleteUrl: (id) => `/api/clips/${id}`,
+    toast,
+  });
+
+  // ── Live clip list: refetch the full (ranked, reasons-carrying) list whenever
+  // the SSE `clips` event fires, dropping rows whose delete is mid-undo. ────────
+  useEffect(() => {
+    if (stream.clipsRevision === 0) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/clips`, { cache: "no-store" });
+        if (!res.ok) return;
+        const body = (await res.json()) as { clips: ProjectClip[] };
+        if (!alive) return;
+        const pending = getPendingIds();
+        setClips(pending.size ? body.clips.filter((c) => !pending.has(c.id)) : body.clips);
+      } catch {
+        /* a dropped refetch retries on the next event */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [stream.clipsRevision, projectId, getPendingIds]);
+
+  // ── Pipeline: derive live from SSE jobs once the stream has delivered, else the
+  // server-rendered initial steps (no flash on first paint). ───────────────────
+  const steps: PipelineStep[] =
+    stream.clipsRevision === 0
+      ? initialSteps
+      : derivePipeline({
+          jobs: stream.jobs.map((j) => ({ type: j.type, status: j.status, error: j.error })),
+          projectStatus,
+          hasAudio,
+          transcribed,
+          clipCount: clips.length,
+        });
+
+  const generationComplete =
+    initialGenerationComplete || stream.jobs.some((j) => j.type === "generate-clips" && j.status === "done");
+
+  const transcribeStep = steps.find((s) => s.key === "transcribe");
+  const generateStep = steps.find((s) => s.key === "generate-clips");
+  const transcribing = (transcribeStep?.status === "running" || transcribeStep?.status === "queued") && segments.length === 0;
+  const clipsLoading = (generateStep?.status === "running" || generateStep?.status === "queued") && clips.length === 0;
+
+  // A poster job finishing bumps this so cards retry a previously-404 thumbnail.
+  const thumbVersion = stream.jobs.filter((j) => j.type === "clip-thumbnail" && j.status === "done").length;
+
+  // ── Regenerate: clear the spinner when the new generate-clips job goes terminal
+  // OR the clip set changes (the spec's two signals) — the latter also covers the
+  // edge where the stream had not delivered jobs yet at click time.
+  useEffect(() => {
+    if (!regenerating) return;
+    const fresh = stream.jobs.find((j) => j.type === "generate-clips" && !regenPrevGenIds.current.has(j.id));
+    const jobTerminal = fresh && (fresh.status === "done" || fresh.status === "failed");
+    const clipsChanged = stream.clipsRevision > regenStartRevision.current;
+    if (jobTerminal || clipsChanged) setRegenerating(false);
+  }, [stream.jobs, stream.clipsRevision, regenerating]);
+
+  const regenerate = useCallback(async () => {
+    regenPrevGenIds.current = new Set(
+      stream.jobs.filter((j) => j.type === "generate-clips").map((j) => j.id),
+    );
+    regenStartRevision.current = stream.clipsRevision;
+    setRegenerating(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/regenerate-clips`, { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+    } catch {
+      setRegenerating(false);
+      toast({ title: "Could not start regeneration", variant: "danger" });
+    }
+  }, [stream.jobs, stream.clipsRevision, projectId, toast]);
+
+  // ── Player wiring ────────────────────────────────────────────────────────────
   const seekTo = useCallback((seconds: number) => {
     const video = videoRef.current;
     if (!video) return;
-    // A transcript click is "show me this moment", not "play": clear any preview
-    // target and set the time, which is what triggers the video route's Range
-    // request. The element stays paused if it already was.
     previewOut.current = null;
     video.currentTime = seconds;
+    setCurrentTime(seconds);
   }, []);
 
   const previewRange = useCallback((inPoint: number, outPoint: number) => {
@@ -81,72 +179,152 @@ export function ProjectWorkspace({
       video.pause();
       previewOut.current = null;
     }
+    setCurrentTime(video.currentTime);
     setActiveIndex(activeSegmentIndex(segments, video.currentTime));
   }, [segments]);
 
+  const onProgress = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || video.buffered.length === 0) return;
+    setBuffered(video.buffered.end(video.buffered.length - 1));
+  }, []);
+
+  // ── Cross-panel actions ──────────────────────────────────────────────────────
+  const onReasonClick = useCallback(
+    (clip: ProjectClip) => {
+      const index = firstSegmentInRange(segments, clip.inPoint, clip.outPoint);
+      setFlash((f) => ({ index, nonce: f.nonce + 1 }));
+    },
+    [segments],
+  );
+
+  const createClipFromRange = useCallback(
+    async (start: number, end: number) => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/clips`, {
+          method: "POST",
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ inPoint: start, outPoint: end }),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const body = (await res.json()) as { clip: ProjectClip };
+        setClips((current) => [...current, body.clip]);
+        toast({ title: "Clip created from selection", variant: "success" });
+      } catch {
+        toast({ title: "Could not create clip", variant: "danger" });
+      }
+    },
+    [projectId, toast],
+  );
+
+  const deleteClip = useCallback(
+    (clip: ProjectClip) => {
+      removeOne(clips, clip, { title: `Deleted ${clipTitle(clip)}` });
+    },
+    [removeOne, clips],
+  );
+
+  const deleteClips = useCallback(
+    (items: ProjectClip[]) => {
+      if (items.length === 0) return;
+      removeMany(clips, items, {
+        title: `Deleted ${items.length} clip${items.length === 1 ? "" : "s"}`,
+      });
+    },
+    [removeMany, clips],
+  );
+
+  const durationSafe = duration ?? 0;
+  const captionsDisabled = captionsDisabledMessage(hasAudio);
+  const emptyMessage = emptyTranscriptMessage(transcript);
+
   return (
     <div className="flex flex-col gap-8">
+      <PipelineStepper steps={steps} projectId={projectId} />
+
       {captionsDisabled ? (
         <p
           data-testid="captions-disabled"
           role="status"
-          className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
+          className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300"
         >
           {captionsDisabled}
         </p>
       ) : null}
 
-      <video
-        ref={videoRef}
-        src={sourceVideoUrl(projectId)}
-        controls
-        preload="metadata"
-        onTimeUpdate={onTimeUpdate}
-        className="w-full rounded-lg bg-black"
-      />
+      <div className="flex flex-col gap-8 xl:grid xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
+        {/* Left column: sticky player + clips */}
+        <div className="flex flex-col gap-8">
+          <div className="flex flex-col gap-2 xl:sticky xl:top-14 xl:z-10">
+            <div className="relative overflow-hidden rounded-lg bg-black">
+              <video
+                ref={videoRef}
+                src={sourceVideoUrl(projectId)}
+                controls
+                preload="metadata"
+                onTimeUpdate={onTimeUpdate}
+                onProgress={onProgress}
+                onLoadedMetadata={() => setVideoReady(true)}
+                className="w-full"
+              />
+              {!videoReady ? <PosterSkeleton /> : null}
+            </div>
+            <Seekbar
+              duration={durationSafe}
+              currentTime={currentTime}
+              buffered={buffered}
+              markIn={markIn}
+              markOut={markOut}
+              onSeek={seekTo}
+              onMarkIn={setMarkIn}
+              onMarkOut={setMarkOut}
+            />
+          </div>
 
-      <ClipsPanel
-        projectId={projectId}
-        duration={duration}
-        generationComplete={generationComplete}
-        initialClips={initialClips}
-        onPreview={previewRange}
-        getCurrentTime={getCurrentTime}
-      />
+          <ClipsPanel
+            projectId={projectId}
+            duration={duration}
+            generationComplete={generationComplete}
+            clips={clips}
+            setClips={setClips}
+            loading={clipsLoading}
+            markIn={markIn}
+            markOut={markOut}
+            setMarkIn={setMarkIn}
+            setMarkOut={setMarkOut}
+            getCurrentTime={getCurrentTime}
+            regenerating={regenerating}
+            onRegenerate={regenerate}
+            onPreview={previewRange}
+            onReasonClick={onReasonClick}
+            onDelete={deleteClip}
+            onDeleteMany={deleteClips}
+            onOpenExports={() => setExportsOpen(true)}
+            thumbVersion={thumbVersion}
+          />
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          Transcript
-        </h2>
+          <ExportsDrawer
+            clips={clips}
+            liveExports={stream.liveExports}
+            open={exportsOpen}
+            onOpenChange={setExportsOpen}
+          />
+        </div>
 
-        {emptyMessage ? (
-          <p className="rounded-lg border border-zinc-200 p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-            {emptyMessage}
-          </p>
-        ) : (
-          <ol className="flex flex-col gap-1">
-            {segments.map((segment, index) => (
-              <li key={`${segment.start}-${index}`}>
-                <button
-                  type="button"
-                  onClick={() => seekTo(segment.start)}
-                  aria-current={index === activeIndex ? "true" : undefined}
-                  className={`flex w-full gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                    index === activeIndex
-                      ? "bg-blue-50 text-zinc-900 dark:bg-blue-950/50 dark:text-zinc-100"
-                      : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                  }`}
-                >
-                  <span className="shrink-0 pt-0.5 font-mono text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
-                    {formatTimestamp(segment.start)}
-                  </span>
-                  <span>{segment.text}</span>
-                </button>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+        {/* Right column: transcript rail (own scroll at xl) */}
+        <div className="xl:sticky xl:top-14 xl:max-h-[calc(100vh-4.5rem)] xl:overflow-y-auto">
+          <TranscriptRail
+            segments={segments}
+            activeIndex={activeIndex}
+            emptyMessage={emptyMessage}
+            skeleton={Boolean(transcribing)}
+            flashIndex={flash.index}
+            flashNonce={flash.nonce}
+            onSeek={seekTo}
+            onCreateClip={createClipFromRange}
+          />
+        </div>
+      </div>
     </div>
   );
 }

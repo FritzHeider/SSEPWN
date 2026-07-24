@@ -1,12 +1,7 @@
 import { desc, eq } from "drizzle-orm";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { CaptionEditor } from "./_components/caption-editor";
-import { CropPanel } from "./_components/crop-panel";
-import { ExportPanel } from "./_components/export-panel";
-import { TemplatePanel } from "./_components/template-panel";
-import { TimelinePanel } from "./_components/timeline-panel";
+import { EditorShell } from "./_components/editor-shell";
 import { parseId } from "@/lib/api/params";
 import type { CaptionDoc } from "@/lib/captions/ass";
 import { buildCaptionDoc, readCaptionDoc } from "@/lib/captions/edit";
@@ -113,64 +108,28 @@ export default async function ClipEditorPage({ params }: { params: Promise<{ id:
   const range = `${formatDuration(clip.inPoint)} – ${formatDuration(clip.outPoint)}`;
 
   return (
-    <div className="flex flex-1 justify-center bg-zinc-50 px-6 py-12 font-sans dark:bg-black">
-      <main className="flex w-full max-w-3xl flex-col gap-8">
-        <header className="flex flex-col gap-2">
-          <Link
-            href={`/projects/${clip.projectId}`}
-            className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-          >
-            ← {project.name}
-          </Link>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-            {title}
-          </h1>
-          <p className="font-mono text-sm tabular-nums text-zinc-500 dark:text-zinc-400">{range}</p>
-        </header>
-
-        <CropPanel
-          clipId={clip.id}
-          projectId={clip.projectId}
-          inPoint={clip.inPoint}
-          outPoint={clip.outPoint}
-          srcWidth={project.width ?? 0}
-          srcHeight={project.height ?? 0}
-          initialCrop={crop}
-        />
-
-        <TemplatePanel
-          clipId={clip.id}
-          templates={templates}
-          appliedTemplateId={appliedTemplateId}
-          canUndo={hasTemplateUndo(stateObj)}
-          durationSec={clip.outPoint - clip.inPoint}
-          presetOverride={presetOverride}
-          projectPreset={projectPreset}
-        />
-
-        <TimelinePanel
-          clipId={clip.id}
-          projectId={clip.projectId}
-          initialDoc={timeline}
-          captionDoc={doc}
-        />
-
-        <CaptionEditor
-          clipId={clip.id}
-          projectId={clip.projectId}
-          inPoint={clip.inPoint}
-          outPoint={clip.outPoint}
-          referenceHeight={project.height}
-          initialDoc={doc}
-        />
-
-        <ExportPanel
-          clipId={clip.id}
-          presetOverride={presetOverride}
-          projectPreset={projectPreset}
-          initialExports={exportHistory}
-        />
-      </main>
-    </div>
+    <EditorShell
+      clipId={clip.id}
+      projectId={clip.projectId}
+      projectName={project.name}
+      title={title}
+      range={range}
+      inPoint={clip.inPoint}
+      outPoint={clip.outPoint}
+      srcWidth={project.width ?? 0}
+      srcHeight={project.height ?? 0}
+      referenceHeight={project.height}
+      projectDuration={project.duration}
+      captionDoc={doc}
+      initialCrop={crop}
+      initialTimeline={timeline}
+      templates={templates}
+      appliedTemplateId={appliedTemplateId}
+      templateCanUndo={hasTemplateUndo(stateObj)}
+      durationSec={clip.outPoint - clip.inPoint}
+      presetOverride={presetOverride}
+      projectPreset={projectPreset}
+      initialExports={exportHistory}
+    />
   );
 }

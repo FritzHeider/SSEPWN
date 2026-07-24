@@ -1,9 +1,11 @@
 import { desc, eq } from "drizzle-orm";
+import { statSync } from "node:fs";
 import { NextResponse } from "next/server";
 
 import { parseId } from "@/lib/api/params";
 import { db } from "@/lib/db";
 import { clipEdits, clips, exports, projects } from "@/lib/db/schema";
+import { exportPresetDimensions } from "@/lib/export/view";
 import { createJobQueue } from "@/lib/jobs";
 import type { RenderQuality } from "@/lib/render/execute";
 import {
@@ -66,8 +68,29 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: `No clip with id ${id}`, code: "not_found" }, { status: 404 });
   }
 
+  const bounds = db
+    .select({ inPoint: clips.inPoint, outPoint: clips.outPoint })
+    .from(clips)
+    .where(eq(clips.id, id))
+    .get();
+  const durationSec = bounds ? Math.max(0, bounds.outPoint - bounds.inPoint) : null;
+
   const rows = db.select().from(exports).where(eq(exports.clipId, id)).orderBy(desc(exports.id)).all();
-  return NextResponse.json({ exports: rows });
+  // Enrich each row with delivery metadata: the preset's output dimensions, the
+  // clip duration, and the rendered file's size once it exists on disk.
+  const enriched = rows.map((row) => {
+    const { width, height } = exportPresetDimensions(row.preset);
+    let fileSizeBytes: number | null = null;
+    if (row.status === "done" && row.outputPath) {
+      try {
+        fileSizeBytes = statSync(row.outputPath).size;
+      } catch {
+        fileSizeBytes = null;
+      }
+    }
+    return { ...row, width, height, durationSec, fileSizeBytes };
+  });
+  return NextResponse.json({ exports: enriched });
 }
 
 /**

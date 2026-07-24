@@ -42,6 +42,8 @@ test("apply tiktok-bold: caption preview restyles to bold-pop and the CTA appear
   await expect(timeline.getByTestId("cta-overlay")).toHaveCount(0);
 
   // --- apply the built-in tiktok-bold template from the gallery ---------------
+  // The gallery lives on the Template tab of the right pane; open it first.
+  await page.getByTestId("editor-tab-template").click();
   const card = page.getByTestId("template-card").filter({ hasText: TIKTOK_BOLD_NAME });
   await expect(card).toHaveCount(1);
   await expect(card).toHaveAttribute("data-applied", "false");
@@ -61,7 +63,9 @@ test("apply tiktok-bold: caption preview restyles to bold-pop and the CTA appear
   await expect(captionOverlay).toContainText("HELLO");
 
   // CTA appeared: the template's "Follow for more" text CTA is on the overlay
-  // track and rendered in the live preview at the playhead.
+  // track and rendered in the live preview at the playhead. The CTA editor row
+  // lives on the Timeline tab (the overlay itself renders on the shared player).
+  await timeline.getByTestId("editor-tab-timeline").click();
   const ctaRow = timeline.getByTestId("cta-row");
   await expect(ctaRow).toHaveCount(1);
   await expect(ctaRow).toHaveAttribute("data-cta-variant", "text");

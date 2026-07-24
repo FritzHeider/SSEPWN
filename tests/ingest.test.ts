@@ -63,7 +63,7 @@ describe("ingest handler", () => {
     const worker = createWorker({
       queue,
       db: testDb.db,
-      handlers: { ingest: createIngestHandler({ dir: () => thumbDir }) },
+      handlers: { ingest: createIngestHandler({ dir: () => thumbDir, generateWaveformFn: async () => "" }) },
       pollMs: POLL_MS,
       logger: silentLogger,
     });
@@ -189,6 +189,7 @@ describe("ingest handler", () => {
     let calls = 0;
     const flaky = createIngestHandler({
       dir: () => thumbDir,
+      generateWaveformFn: async () => "",
       probeFn: async (p) => {
         calls += 1;
         if (calls === 1) throw new Error("transient ffprobe glitch");
@@ -218,7 +219,7 @@ describe("ingest handler", () => {
   it("reports progress as it works", async () => {
     const projectId = seedUploadedProject(SHORT_SAMPLE);
     const seen: number[] = [];
-    const handler = createIngestHandler({ dir: () => thumbDir });
+    const handler = createIngestHandler({ dir: () => thumbDir, generateWaveformFn: async () => "" });
     await handler({
       job: queue.enqueue("ingest", projectId),
       db: testDb.db,
